@@ -16,7 +16,7 @@ A dark-themed, frameless desktop widget inspired by NZXT CAM — built with PyQt
 - **Frameless window** — draggable from title bar, resizable from bottom-right grip
 - **Dock-to-top** — snaps the window to the top edge of the monitor as a full-width bar; click again to restore
 - **System tray only** — no taskbar icon; left-click the tray icon to show/hide; close button hides to tray
-- **Auto-detects NVIDIA GPU** via pynvml for usage, VRAM, and temperature
+- **Auto-detects NVIDIA and AMD GPUs** — NVIDIA via pynvml, AMD via sysfs (no extra drivers needed)
 - **Dark aesthetic** — `#090b10` background, JetBrains Mono Nerd Font, neon cyan / green / purple / amber
 
 ---
@@ -89,7 +89,11 @@ rem or
 
 ### GPU Monitoring
 
-GPU support is provided via `pynvml` (nvidia-ml-py) and covers **NVIDIA GPUs only**. AMD GPU monitoring is not currently supported. If no supported GPU is detected, GPU gauges will display as unavailable.
+**NVIDIA** GPUs are monitored via `pynvml` (nvidia-ml-py).
+
+**AMD** GPUs are monitored via the `amdgpu` kernel driver's sysfs interface — no extra software or drivers required beyond what ships with the Linux kernel. Usage, VRAM, and temperature are all supported.
+
+If no supported GPU is detected, GPU gauges will display as unavailable.
 
 ### CPU Temperature on Windows
 
