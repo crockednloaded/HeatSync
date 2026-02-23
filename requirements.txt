@@ -1,3 +1,9 @@
 PyQt6>=6.4.0
 psutil>=5.9.0
 nvidia-ml-py>=12.0.0
+
+# Test dependencies (optional)
+pytest>=7.0.0
+pytest-cov>=4.0.0
+pytest-mock>=3.10.0
+Pillow>=9.0.0
