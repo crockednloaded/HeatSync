@@ -192,16 +192,15 @@ jobs:
             cp assets/icon.png AppDir/usr/share/icons/hicolor/256x256/apps/heatsync.png
           else
             echo "Creating placeholder icon..."
-            python3 -c "
-import os
-try:
-    from PIL import Image
-    img = Image.new('RGB', (256, 256), color='#1a1a2e')
-    img.save('AppDir/usr/share/icons/hicolor/256x256/apps/heatsync.png')
-except ImportError:
-    # Fallback: use ImageMagick if PIL not available
-    os.system('convert -size 256x256 xc:\"#1a1a2e\" AppDir/usr/share/icons/hicolor/256x256/apps/heatsync.png')
-"
+            python3 << 'PYSCRIPT'
+            import os
+            try:
+                from PIL import Image
+                img = Image.new('RGB', (256, 256), color='#1a1a2e')
+                img.save('AppDir/usr/share/icons/hicolor/256x256/apps/heatsync.png')
+            except ImportError:
+                os.system('convert -size 256x256 xc:"#1a1a2e" AppDir/usr/share/icons/hicolor/256x256/apps/heatsync.png')
+            PYSCRIPT
           fi
 
           ./linuxdeploy-x86_64.AppImage \
