@@ -126,21 +126,23 @@ jobs:
           mkdir -p AppDir/usr/bin AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/256x256/apps
           cp dist/HeatSync AppDir/usr/bin/
           
+          # Create desktop file with optional icon
+          ICON_LINE=""
+          if [ -f "assets/icon.png" ]; then
+            cp assets/icon.png AppDir/usr/share/icons/hicolor/256x256/apps/heatsync.png
+            ICON_LINE="Icon=heatsync"
+          fi
+          
           cat > AppDir/usr/share/applications/heatsync.desktop << EOF
           [Desktop Entry]
           Type=Application
           Name=HeatSync
           Comment=Real-time system monitor
           Exec=HeatSync
-          Icon=heatsync
+          ${ICON_LINE}
           Categories=System;Monitor;
           Terminal=false
           EOF
-
-          # Copy icon if available
-          if [ -f "assets/icon.png" ]; then
-            cp assets/icon.png AppDir/usr/share/icons/hicolor/256x256/apps/heatsync.png
-          fi
 
           ./linuxdeploy-x86_64.AppImage \
             --appdir AppDir \
