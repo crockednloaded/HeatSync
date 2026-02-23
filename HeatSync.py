@@ -140,16 +140,35 @@ def s_cpu_temp() -> float:
         return 0.0
     try:
         temps = psutil.sensors_temperatures()
-        for key in ("k10temp", "zenpower", "coretemp"):
+        if not temps:
+            return 0.0
+        # Known driver keys with preferred label names (AMD + Intel + ARM)
+        _PREF: list[tuple[str, tuple[str, ...]]] = [
+            ("k10temp",    ("Tctl", "Tdie", "Tccd1")),
+            ("zenpower",   ("Tctl", "Tdie")),
+            ("coretemp",   ("Package id 0", "Physical id 0")),
+            ("cpu_thermal", ()),   # Raspberry Pi / ARM SoCs
+            ("acpitz",     ()),    # ACPI generic thermal zone
+        ]
+        for key, good_labels in _PREF:
             if key not in temps:
                 continue
             entries = temps[key]
-            tctl = next(
-                (e.current for e in entries
-                 if e.label in ("Tctl", "Package id 0", "Tdie")),
-                None,
-            )
-            return tctl if tctl is not None else entries[0].current
+            if good_labels:
+                hit = next((e.current for e in entries if e.label in good_labels), None)
+                if hit is not None:
+                    return hit
+            if entries:
+                return entries[0].current
+        # Generic fallback: scan all sensor groups for a plausible CPU temp
+        def _plausible(v: float) -> bool: return 20.0 <= v <= 120.0
+        for prefer_cpu in (True, False):
+            for key, entries in temps.items():
+                if prefer_cpu and "cpu" not in key.lower():
+                    continue
+                for e in entries:
+                    if _plausible(e.current):
+                        return e.current
     except Exception:
         pass
     return 0.0
@@ -676,22 +695,26 @@ class MainWindow(QMainWindow):
         t = QTimer(self); t.timeout.connect(self._refresh); t.start(1000)
         self._refresh()
 
-        # System tray
-        self._tray = QSystemTrayIcon(self)
-        self._tray.setIcon(_make_tray_icon())
-        self._tray.setToolTip("HeatSync")
-        menu = QMenu()
-        menu.addAction("Show / Hide").triggered.connect(self._toggle_visibility)
-        menu.addAction("Quit").triggered.connect(QApplication.instance().quit)
-        self._tray.setContextMenu(menu)
-        self._tray.activated.connect(self._tray_activated)
-        self._tray.show()
+        # System tray (optional — not all desktops/WMs provide one)
+        if QSystemTrayIcon.isSystemTrayAvailable():
+            self._tray = QSystemTrayIcon(self)
+            self._tray.setIcon(_make_tray_icon())
+            self._tray.setToolTip("HeatSync")
+            menu = QMenu()
+            menu.addAction("Show / Hide").triggered.connect(self._toggle_visibility)
+            menu.addAction("Quit").triggered.connect(QApplication.instance().quit)
+            self._tray.setContextMenu(menu)
+            self._tray.activated.connect(self._tray_activated)
+            self._tray.show()
+        else:
+            self._tray = None
+            print("[INFO] No system tray available — close button will quit.")
 
         if IS_WAYLAND:
             QTimer.singleShot(600, self._kwin_skip_taskbar)
 
     def closeEvent(self, e):
-        if self._tray.isVisible():
+        if self._tray and self._tray.isVisible():
             self.hide(); e.ignore()
         else:
             e.accept()
