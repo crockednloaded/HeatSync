@@ -7,6 +7,7 @@ https://github.com/crockednloaded/HeatSync
 
 import sys
 import os
+import glob
 import math
 import warnings
 import subprocess
@@ -54,9 +55,13 @@ IS_WAYLAND = (sys.platform == "linux" and
               bool(os.environ.get("WAYLAND_DISPLAY") or
                    os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland"))
 
-# ── NVIDIA init ──────────────────────────────────────────────────────────────
-GPU_HANDLE = None
-GPU_NAME   = "GPU Unavailable"
+# ── GPU init (NVIDIA via pynvml, AMD via sysfs) ───────────────────────────────
+GPU_HANDLE  = None    # pynvml handle — set if NVIDIA found
+GPU_NAME    = "GPU Unavailable"
+_AMD_DEV    = None    # /sys/class/drm/cardX/device — set if AMD found
+_AMD_HWMON  = None    # /sys/class/drm/cardX/device/hwmon/hwmonY
+
+# Try NVIDIA first
 try:
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
@@ -65,8 +70,50 @@ try:
     GPU_HANDLE = pynvml.nvmlDeviceGetHandleByIndex(0)
     _n = pynvml.nvmlDeviceGetName(GPU_HANDLE)
     GPU_NAME = _n.decode() if isinstance(_n, bytes) else _n
-except Exception as _gpu_exc:
-    print(f"[WARN] GPU monitoring unavailable: {_gpu_exc}")
+except Exception:
+    pass
+
+# Try AMD if no NVIDIA found (Linux only — uses amdgpu kernel driver sysfs)
+if not GPU_HANDLE and sys.platform == "linux":
+    for _card in sorted(glob.glob("/sys/class/drm/card*/device")):
+        try:
+            with open(os.path.join(_card, "vendor")) as _f:
+                if _f.read().strip() != "0x1002":
+                    continue           # not AMD
+        except Exception:
+            continue
+        _AMD_DEV = _card
+        _hw = glob.glob(os.path.join(_card, "hwmon", "hwmon*"))
+        _AMD_HWMON = _hw[0] if _hw else None
+        # GPU name: try product_name, then lspci, then generic
+        GPU_NAME = "AMD GPU"
+        try:
+            with open(os.path.join(_card, "product_name")) as _f:
+                _pn = _f.read().strip()
+                if _pn:
+                    GPU_NAME = _pn
+        except Exception:
+            pass
+        if GPU_NAME == "AMD GPU":
+            try:
+                with open(os.path.join(_card, "uevent")) as _f:
+                    _slot = next(
+                        (l.split("=", 1)[1].strip() for l in _f
+                         if l.startswith("PCI_SLOT_NAME=")), None
+                    )
+                if _slot:
+                    _r = subprocess.run(["lspci", "-s", _slot],
+                                        capture_output=True, text=True, timeout=3)
+                    if _r.returncode == 0:
+                        _parts = _r.stdout.strip().split(":", 2)
+                        if len(_parts) >= 3:
+                            GPU_NAME = _parts[2].strip()
+            except Exception:
+                pass
+        print(f"[INFO] AMD GPU: {GPU_NAME}")
+        break
+    else:
+        print("[WARN] No supported GPU found (NVIDIA or AMD)")
 
 # ── Palette ──────────────────────────────────────────────────────────────────
 BG       = "#090b10"
@@ -174,31 +221,62 @@ def s_cpu_temp() -> float:
     return 0.0
 
 def s_gpu_usage() -> float:
-    if not GPU_HANDLE:
-        return 0.0
-    try:
-        return float(pynvml.nvmlDeviceGetUtilizationRates(GPU_HANDLE).gpu)
-    except Exception:
-        return 0.0
+    if GPU_HANDLE:
+        try:
+            return float(pynvml.nvmlDeviceGetUtilizationRates(GPU_HANDLE).gpu)
+        except Exception:
+            return 0.0
+    if _AMD_DEV:
+        try:
+            with open(os.path.join(_AMD_DEV, "gpu_busy_percent")) as f:
+                return float(f.read().strip())
+        except Exception:
+            return 0.0
+    return 0.0
 
 def s_gpu_temp() -> float:
-    if not GPU_HANDLE:
-        return 0.0
-    try:
-        return float(pynvml.nvmlDeviceGetTemperature(
-            GPU_HANDLE, pynvml.NVML_TEMPERATURE_GPU))
-    except Exception:
-        return 0.0
+    if GPU_HANDLE:
+        try:
+            return float(pynvml.nvmlDeviceGetTemperature(
+                GPU_HANDLE, pynvml.NVML_TEMPERATURE_GPU))
+        except Exception:
+            return 0.0
+    if _AMD_DEV:
+        # Prefer hwmon temp1_input (millidegrees → °C)
+        if _AMD_HWMON:
+            try:
+                with open(os.path.join(_AMD_HWMON, "temp1_input")) as f:
+                    return float(f.read().strip()) / 1000.0
+            except Exception:
+                pass
+        # Fallback: psutil amdgpu sensor
+        try:
+            temps = psutil.sensors_temperatures()
+            if "amdgpu" in temps and temps["amdgpu"]:
+                return temps["amdgpu"][0].current
+        except Exception:
+            pass
+    return 0.0
 
 def s_gpu_vram():
-    if not GPU_HANDLE:
-        return 0, 0, 0
-    try:
-        m = pynvml.nvmlDeviceGetMemoryInfo(GPU_HANDLE)
-        pct = m.used / m.total * 100 if m.total else 0
-        return m.used >> 20, m.total >> 20, pct
-    except Exception:
-        return 0, 0, 0
+    if GPU_HANDLE:
+        try:
+            m = pynvml.nvmlDeviceGetMemoryInfo(GPU_HANDLE)
+            pct = m.used / m.total * 100 if m.total else 0
+            return m.used >> 20, m.total >> 20, pct
+        except Exception:
+            return 0, 0, 0
+    if _AMD_DEV:
+        try:
+            with open(os.path.join(_AMD_DEV, "mem_info_vram_used")) as f:
+                used = int(f.read().strip())
+            with open(os.path.join(_AMD_DEV, "mem_info_vram_total")) as f:
+                total = int(f.read().strip())
+            pct = used / total * 100 if total else 0
+            return used >> 20, total >> 20, pct
+        except Exception:
+            pass
+    return 0, 0, 0
 
 def s_ram():
     v = psutil.virtual_memory()
