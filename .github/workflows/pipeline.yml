@@ -1,0 +1,101 @@
+name: 🐍 Python builds 📦
+run-name: "Python builds from trigger: ${{ github.event_name }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version number (no v prefix, e.g. 8.0.0.10)"
+        required: false
+        type: string
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  packages: read
+  contents: write
+  statuses: write
+  pull-requests: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+
+# ─────────────────────────────────────────────
+# 🔧 TOP-LEVEL OVERRIDES — edit these to adapt
+#    this workflow to your project
+# ─────────────────────────────────────────────
+env:
+  # Project identity
+  PACKAGE_NAME: "HeatSync"          # PyPI / release display name
+  PACKAGE_FILENAME: "HeatSync"          # Stem of the .py entry-point & compiled .exe
+  WORKING_DIR: ${{ github.workspace }}
+
+  # Python targets
+  PYTHON_BUILD_VERSION: "3.x"            # Version used for the sdist/wheel build job
+  PYTHON_RELEASE_VERSION: "3.10"         # Matrix version that produces the release .exe
+  PYTHON_MATRIX: '["3.10", "3.11"]'      # JSON array of Windows binary matrix versions
+
+  # Playwright browser (0 = bundle alongside the binary)
+  PLAYWRIGHT_BROWSERS_PATH: "0"
+
+  # Resolved at runtime — do not edit
+  PACKAGE_VERSION: ${{ inputs.version || needs.versioner.outputs.version || github.event.release.tag_name }}
+
+# ─────────────────────────────────────────────
+
+jobs:
+  build:
+    name: Build distribution 📦
+    runs-on: ubuntu-latest
+    needs: versioner
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          lfs: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_BUILD_VERSION }}
+
+      - name: Set version number
+        working-directory: ${{ env.WORKING_DIR }}
+        run: |
+          sed -i 's/^version = .*/version = "${{ needs.versioner.outputs.version }}"/' pyproject.toml
+
+      - name: Install pypa/build
+        run: python3 -m pip install build --user
+
+      - name: Build wheel and source tarball
+        working-directory: ${{ env.WORKING_DIR }}
+        run: python3 -m build
+
+      - name: Store distribution packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-package-distributions
+          path: ${{ env.WORKING_DIR }}/dist/
+
+  github-release:
+    name: 🔐 Sign & Create GitHub Release 🏷️
+    if: github.ref_name == 'main'
+    needs:
+      - build
+      - versioner
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - name: Download dists
+        uses: actions/download-artifact@v4
+        with:
+          name: python-package-distributions
+... (89 lines left)
