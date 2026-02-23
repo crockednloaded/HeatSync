@@ -126,23 +126,34 @@ jobs:
           mkdir -p AppDir/usr/bin AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/256x256/apps
           cp dist/HeatSync AppDir/usr/bin/
           
-          # Create desktop file with optional icon
-          ICON_LINE=""
-          if [ -f "assets/icon.png" ]; then
-            cp assets/icon.png AppDir/usr/share/icons/hicolor/256x256/apps/heatsync.png
-            ICON_LINE="Icon=heatsync"
-          fi
-          
+          # Create desktop file (Icon entry is required by linuxdeploy)
           cat > AppDir/usr/share/applications/heatsync.desktop << EOF
           [Desktop Entry]
           Type=Application
           Name=HeatSync
           Comment=Real-time system monitor
           Exec=HeatSync
-          ${ICON_LINE}
+          Icon=heatsync
           Categories=System;Monitor;
           Terminal=false
           EOF
+
+          # Copy icon if available
+          if [ -f "assets/icon.png" ]; then
+            cp assets/icon.png AppDir/usr/share/icons/hicolor/256x256/apps/heatsync.png
+          else
+            echo "Warning: No icon found at assets/icon.png, creating placeholder"
+            # Create a minimal placeholder icon to satisfy linuxdeploy
+            mkdir -p /tmp/icon
+            # Create a simple 256x256 PNG placeholder using ImageMagick or convert
+            python3 << 'PYTHON_EOF'
+            from PIL import Image
+            import os
+            os.makedirs("AppDir/usr/share/icons/hicolor/256x256/apps", exist_ok=True)
+            img = Image.new('RGB', (256, 256), color='#1a1a2e')
+            img.save("AppDir/usr/share/icons/hicolor/256x256/apps/heatsync.png")
+            PYTHON_EOF
+          fi
 
           ./linuxdeploy-x86_64.AppImage \
             --appdir AppDir \
