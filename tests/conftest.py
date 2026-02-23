@@ -8,6 +8,15 @@ from unittest.mock import Mock, patch, MagicMock
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# Skip GUI tests in headless environments
+def is_headless():
+    """Check if running in headless environment (CI/CD)."""
+    return not os.environ.get("DISPLAY") and not os.environ.get("WAYLAND_DISPLAY")
+
+pytestmark = []
+if is_headless():
+    pytestmark.append(pytest.mark.skip(reason="Headless environment - skipping GUI tests"))
+
 
 @pytest.fixture
 def mock_psutil():
@@ -95,3 +104,4 @@ def temp_sysfs_structure(tmp_path):
         "intel_dev": str(intel_dev),
         "intel_hwmon": str(intel_hwmon),
     }
+
