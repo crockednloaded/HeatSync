@@ -41,8 +41,7 @@ env:
   PLAYWRIGHT_BROWSERS_PATH: "0"
 
   # Resolved at runtime — do not edit
-  PACKAGE_VERSION: ${{ inputs.version || needs.versioner.outputs.version || github.event.release.tag_name }}
-
+  PACKAGE_VERSION: 0.0.1
 # ─────────────────────────────────────────────
 
 jobs:
