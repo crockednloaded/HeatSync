@@ -173,16 +173,17 @@ def s_gpu_temp() -> float:
 
 def s_gpu_vram():
     if not GPU_HANDLE:
-        return 0, 0
+        return 0, 0, 0
     try:
         m = pynvml.nvmlDeviceGetMemoryInfo(GPU_HANDLE)
-        return m.used >> 20, m.total >> 20
+        pct = m.used / m.total * 100 if m.total else 0
+        return m.used >> 20, m.total >> 20, pct
     except Exception:
-        return 0, 0
+        return 0, 0, 0
 
 def s_ram():
     v = psutil.virtual_memory()
-    return v.used / 1e9, v.total / 1e9
+    return v.used / 1e9, v.total / 1e9, v.percent
 
 def s_cpu_freq() -> float:
     f = psutil.cpu_freq()
@@ -294,16 +295,30 @@ class ArcGauge(QWidget):
 
 # ── Sparkline ────────────────────────────────────────────────────────────────
 class Sparkline(QWidget):
-    def __init__(self, color=CYAN, max_pts=90):
+    def __init__(self, color=CYAN, max_pts=90, unit=""):
         super().__init__()
         self._col  = QColor(color)
         self._hist: deque = deque(maxlen=max_pts)
+        self._unit = unit
+        self._hover_x = -1.0
         self.setFixedHeight(64)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setMouseTracking(True)
 
     def push(self, v):
         self._hist.append(v); self.update()
+
+    def mouseMoveEvent(self, e):
+        if len(self._hist) < 2:
+            return
+        self._hover_x = e.position().x()
+        self.update()
+
+    def leaveEvent(self, e):
+        self._hover_x = -1.0
+        self.update()
+        super().leaveEvent(e)
 
     def paintEvent(self, _e):
         if len(self._hist) < 2: return
@@ -342,6 +357,46 @@ class Sparkline(QWidget):
             c = QColor(self._col); c.setAlpha(da)
             p.setPen(Qt.PenStyle.NoPen); p.setBrush(QBrush(c))
             p.drawEllipse(tip, dr, dr)
+
+        # hover indicator — pixel-accurate via interpolation
+        if self._hover_x >= 0:
+            mx = max(pts[0].x(), min(pts[-1].x(), self._hover_x))
+            # find the segment containing mx and interpolate
+            hp, hval = pts[-1], vals[-1]
+            for i in range(len(pts) - 1):
+                x0, x1 = pts[i].x(), pts[i + 1].x()
+                if x0 <= mx <= x1:
+                    t    = (mx - x0) / (x1 - x0) if x1 > x0 else 0.0
+                    hy   = pts[i].y()   + t * (pts[i + 1].y()   - pts[i].y())
+                    hval = vals[i]      + t * (vals[i + 1]       - vals[i])
+                    hp   = QPointF(mx, hy)
+                    break
+
+            vc = QColor(self._col); vc.setAlpha(40)
+            p.setPen(QPen(vc, 1, Qt.PenStyle.SolidLine))
+            p.drawLine(QPointF(hp.x(), py), QPointF(hp.x(), H))
+            for dr, da in ((6, 25), (3.5, 80), (2, 220)):
+                c = QColor(self._col); c.setAlpha(da)
+                p.setPen(Qt.PenStyle.NoPen); p.setBrush(QBrush(c))
+                p.drawEllipse(hp, dr, dr)
+
+            label = f"{hval:.1f}{self._unit}"
+            p.setFont(_font(10, bold=True))
+            fm  = p.fontMetrics()
+            pad = 4
+            bw  = fm.horizontalAdvance(label) + pad * 2
+            bh  = fm.height() + pad * 2
+            bx  = min(max(hp.x() - bw / 2, 0), W - bw)
+            by  = 2
+            bg  = QColor(CARD_BG); bg.setAlpha(210)
+            p.setPen(Qt.PenStyle.NoPen); p.setBrush(QBrush(bg))
+            p.drawRoundedRect(QRectF(bx, by, bw, bh), 4, 4)
+            bc = QColor(self._col); bc.setAlpha(160)
+            p.setPen(QPen(bc, 1)); p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawRoundedRect(QRectF(bx, by, bw, bh), 4, 4)
+            p.setPen(QColor(TXT_HI))
+            p.drawText(QRectF(bx, by, bw, bh), Qt.AlignmentFlag.AlignCenter, label)
+
         p.end()
 
 
@@ -353,7 +408,7 @@ class MonitorCard(QFrame):
         super().__init__()
         self._accent = QColor(color)
         self.gauge   = ArcGauge(label, unit, lo, hi, color, warn, danger)
-        self.spark   = Sparkline(color)
+        self.spark   = Sparkline(color, unit=unit)
 
         sep = QFrame(); sep.setFixedHeight(1)
         sep.setStyleSheet(f"background: {CARD_BD}; border: none; border-radius: 0;")
@@ -401,12 +456,12 @@ class StatusBar(QWidget):
         lay.addStretch()
 
     def refresh(self):
-        used_r, tot_r = s_ram()
-        self._lbs["RAM"].setText(f"RAM  {used_r:.1f} / {tot_r:.0f} GB")
+        used_r, tot_r, pct_r = s_ram()
+        self._lbs["RAM"].setText(f"RAM  {used_r:.1f} / {tot_r:.0f} GB  ({pct_r:.0f}%)")
 
-        used_v, tot_v = s_gpu_vram()
+        used_v, tot_v, pct_v = s_gpu_vram()
         self._lbs["VRAM"].setText(
-            f"VRAM  {used_v:,} / {tot_v:,} MB" if tot_v else "VRAM  N/A"
+            f"VRAM  {used_v:,} / {tot_v:,} MB  ({pct_v:.0f}%)" if tot_v else "VRAM  N/A"
         )
 
         self._lbs["CPU Freq"].setText(f"CPU Freq  {s_cpu_freq():.2f} GHz")
@@ -542,6 +597,8 @@ class TitleBar(QWidget):
 
     def mousePressEvent(self, e):
         if e.button() == Qt.MouseButton.LeftButton:
+            if self._win._docked:
+                self._win.toggle_dock(via_drag=True)
             h = self._win.windowHandle()
             if h: h.startSystemMove()
         super().mousePressEvent(e)
@@ -717,7 +774,7 @@ class MainWindow(QMainWindow):
         )
 
     # ── Dock toggle ───────────────────────────────────────────────────────────
-    def toggle_dock(self):
+    def toggle_dock(self, via_drag: bool = False):
         cw = self.centralWidget()
         if not self._docked:
             self._pre_dock_geom = self.geometry()
@@ -732,12 +789,13 @@ class MainWindow(QMainWindow):
             if isinstance(cw, _Background): cw.set_squared(True)
         else:
             if self._pre_dock_geom is not None:
-                px, py = self._pre_dock_geom.x(), self._pre_dock_geom.y()
                 self.resize(self._pre_dock_geom.width(), self._pre_dock_geom.height())
-                if IS_WAYLAND:
-                    QTimer.singleShot(250, lambda: self._kwin_move(px, py))
-                else:
-                    self.move(px, py)
+                if not via_drag:
+                    px, py = self._pre_dock_geom.x(), self._pre_dock_geom.y()
+                    if IS_WAYLAND:
+                        QTimer.singleShot(250, lambda: self._kwin_move(px, py))
+                    else:
+                        self.move(px, py)
             self._docked = False
             if isinstance(cw, _Background): cw.set_squared(False)
         self._title_bar.dock_btn.set_active(self._docked)
