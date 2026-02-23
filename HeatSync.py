@@ -55,11 +55,13 @@ IS_WAYLAND = (sys.platform == "linux" and
               bool(os.environ.get("WAYLAND_DISPLAY") or
                    os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland"))
 
-# ── GPU init (NVIDIA via pynvml, AMD via sysfs) ───────────────────────────────
+# ── GPU init (NVIDIA via pynvml, AMD via sysfs, Intel via sysfs) ─────────────
 GPU_HANDLE  = None    # pynvml handle — set if NVIDIA found
 GPU_NAME    = "GPU Unavailable"
 _AMD_DEV    = None    # /sys/class/drm/cardX/device — set if AMD found
 _AMD_HWMON  = None    # /sys/class/drm/cardX/device/hwmon/hwmonY
+_INTEL_DEV  = None    # /sys/class/drm/cardX/device — set if Intel found
+_INTEL_HWMON = None   # /sys/class/drm/cardX/device/hwmon/hwmonY
 
 # Try NVIDIA first
 try:
@@ -78,42 +80,74 @@ if not GPU_HANDLE and sys.platform == "linux":
     for _card in sorted(glob.glob("/sys/class/drm/card*/device")):
         try:
             with open(os.path.join(_card, "vendor")) as _f:
-                if _f.read().strip() != "0x1002":
-                    continue           # not AMD
+                _vendor = _f.read().strip()
+                if _vendor == "0x1002":    # AMD vendor ID
+                    _AMD_DEV = _card
+                    _hw = glob.glob(os.path.join(_card, "hwmon", "hwmon*"))
+                    _AMD_HWMON = _hw[0] if _hw else None
+                    # GPU name: try product_name, then lspci, then generic
+                    GPU_NAME = "AMD GPU"
+                    try:
+                        with open(os.path.join(_card, "product_name")) as _f:
+                            _pn = _f.read().strip()
+                            if _pn:
+                                GPU_NAME = _pn
+                    except Exception:
+                        pass
+                    if GPU_NAME == "AMD GPU":
+                        try:
+                            with open(os.path.join(_card, "uevent")) as _f:
+                                _slot = next(
+                                    (l.split("=", 1)[1].strip() for l in _f
+                                     if l.startswith("PCI_SLOT_NAME=")), None
+                                )
+                            if _slot:
+                                _r = subprocess.run(["lspci", "-s", _slot],
+                                                    capture_output=True, text=True, timeout=3)
+                                if _r.returncode == 0:
+                                    _parts = _r.stdout.strip().split(":", 2)
+                                    if len(_parts) >= 3:
+                                        GPU_NAME = _parts[2].strip()
+                        except Exception:
+                            pass
+                    print(f"[INFO] AMD GPU: {GPU_NAME}")
+                    break
+                elif _vendor == "0x8086":  # Intel vendor ID
+                    _INTEL_DEV = _card
+                    _hw = glob.glob(os.path.join(_card, "hwmon", "hwmon*"))
+                    _INTEL_HWMON = _hw[0] if _hw else None
+                    # GPU name: try product_name, then lspci, then generic
+                    GPU_NAME = "Intel GPU"
+                    try:
+                        with open(os.path.join(_card, "product_name")) as _f:
+                            _pn = _f.read().strip()
+                            if _pn:
+                                GPU_NAME = _pn
+                    except Exception:
+                        pass
+                    if GPU_NAME == "Intel GPU":
+                        try:
+                            with open(os.path.join(_card, "uevent")) as _f:
+                                _slot = next(
+                                    (l.split("=", 1)[1].strip() for l in _f
+                                     if l.startswith("PCI_SLOT_NAME=")), None
+                                )
+                            if _slot:
+                                _r = subprocess.run(["lspci", "-s", _slot],
+                                                    capture_output=True, text=True, timeout=3)
+                                if _r.returncode == 0:
+                                    _parts = _r.stdout.strip().split(":", 2)
+                                    if len(_parts) >= 3:
+                                        GPU_NAME = _parts[2].strip()
+                        except Exception:
+                            pass
+                    print(f"[INFO] Intel GPU: {GPU_NAME}")
+                    break
         except Exception:
             continue
-        _AMD_DEV = _card
-        _hw = glob.glob(os.path.join(_card, "hwmon", "hwmon*"))
-        _AMD_HWMON = _hw[0] if _hw else None
-        # GPU name: try product_name, then lspci, then generic
-        GPU_NAME = "AMD GPU"
-        try:
-            with open(os.path.join(_card, "product_name")) as _f:
-                _pn = _f.read().strip()
-                if _pn:
-                    GPU_NAME = _pn
-        except Exception:
-            pass
-        if GPU_NAME == "AMD GPU":
-            try:
-                with open(os.path.join(_card, "uevent")) as _f:
-                    _slot = next(
-                        (l.split("=", 1)[1].strip() for l in _f
-                         if l.startswith("PCI_SLOT_NAME=")), None
-                    )
-                if _slot:
-                    _r = subprocess.run(["lspci", "-s", _slot],
-                                        capture_output=True, text=True, timeout=3)
-                    if _r.returncode == 0:
-                        _parts = _r.stdout.strip().split(":", 2)
-                        if len(_parts) >= 3:
-                            GPU_NAME = _parts[2].strip()
-            except Exception:
-                pass
-        print(f"[INFO] AMD GPU: {GPU_NAME}")
-        break
     else:
-        print("[WARN] No supported GPU found (NVIDIA or AMD)")
+        if not _AMD_DEV and not _INTEL_DEV:
+            print("[WARN] No supported GPU found (NVIDIA, AMD, or Intel)")
 
 # ── Palette ──────────────────────────────────────────────────────────────────
 BG       = "#090b10"
@@ -232,6 +266,25 @@ def s_gpu_usage() -> float:
                 return float(f.read().strip())
         except Exception:
             return 0.0
+    if _INTEL_DEV:
+        # Intel GPU usage via i915/xe driver counters (if available)
+        try:
+            # Try via sysfs intel_gpu_freq_mhz / intel_rps_cur_freq_mhz
+            # Falls back to psutil hwmon if available
+            if _INTEL_HWMON:
+                # Check for freq_* files that indicate activity
+                freq_files = glob.glob(os.path.join(_INTEL_HWMON, "in*_input"))
+                if freq_files:
+                    try:
+                        with open(freq_files[0]) as f:
+                            freq = float(f.read().strip())
+                            # Normalize to ~0-100% (rough estimate based on max ~2500MHz for Intel GPUs)
+                            return min(100.0, (freq / 2500.0) * 100.0)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        return 0.0
     return 0.0
 
 def s_gpu_temp() -> float:
@@ -256,6 +309,23 @@ def s_gpu_temp() -> float:
                 return temps["amdgpu"][0].current
         except Exception:
             pass
+    if _INTEL_DEV:
+        # Intel GPU temperature via hwmon or psutil
+        if _INTEL_HWMON:
+            # Try temp1_input (i915 and xe drivers use hwmon)
+            try:
+                with open(os.path.join(_INTEL_HWMON, "temp1_input")) as f:
+                    return float(f.read().strip()) / 1000.0
+            except Exception:
+                pass
+        # Fallback: psutil i915 or xe sensor
+        try:
+            temps = psutil.sensors_temperatures()
+            for key in ["i915", "xe", "intel_gpu"]:
+                if key in temps and temps[key]:
+                    return temps[key][0].current
+        except Exception:
+            pass
     return 0.0
 
 def s_gpu_vram():
@@ -274,6 +344,21 @@ def s_gpu_vram():
                 total = int(f.read().strip())
             pct = used / total * 100 if total else 0
             return used >> 20, total >> 20, pct
+        except Exception:
+            pass
+    if _INTEL_DEV:
+        # Intel GPU memory via hwmon or sysfs (if exposed by i915/xe driver)
+        try:
+            # Try reading from device mem info files (if available)
+            mem_used_file = os.path.join(_INTEL_DEV, "mem_info_gtt_used")
+            mem_total_file = os.path.join(_INTEL_DEV, "mem_info_gtt_total")
+            if os.path.exists(mem_used_file) and os.path.exists(mem_total_file):
+                with open(mem_used_file) as f:
+                    used = int(f.read().strip())
+                with open(mem_total_file) as f:
+                    total = int(f.read().strip())
+                pct = used / total * 100 if total else 0
+                return used >> 20, total >> 20, pct
         except Exception:
             pass
     return 0, 0, 0
