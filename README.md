@@ -23,7 +23,7 @@ A dark-themed, frameless desktop widget inspired by NZXT CAM — built with PyQt
 
 ## Screenshots
 
-> _Screenshots coming soon._
+![HeatSync docked to top of monitor](assets/screenshot.png)
 
 ---
 
