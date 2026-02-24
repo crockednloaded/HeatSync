@@ -1,8 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=HeatSync
-Comment=Real-time system monitor
-Exec=bash -c 'cd "$(dirname "%k")" && .venv/bin/python HeatSync.py'
-Icon=utilities-system-monitor
-Terminal=false
-StartupNotify=false
