@@ -11,14 +11,31 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Set offscreen Qt platform before any import so PyQt6 works headless in CI
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+# Check if Qt is importable. If not, mock it so sensor tests still work
+# (HeatSync's sensor functions don't need Qt at all).
+try:
+    import PyQt6.QtCore  # type: ignore  # noqa: F401
+    _QT_AVAILABLE = True
+except ImportError:
+    _QT_AVAILABLE = False
+    _qt_mock = MagicMock()
+    for _qt_mod in ["PyQt6", "PyQt6.QtWidgets", "PyQt6.QtCore", "PyQt6.QtGui", "PyQt6.sip"]:
+        sys.modules.setdefault(_qt_mod, _qt_mock)
+
 # Pre-import HeatSync so it is cached in sys.modules before any test patches
-# sys.platform. Without this, a test that patches sys.platform='win32' and then
-# does "from HeatSync import X" triggers a fresh import of HeatSync+psutil under
-# the patched platform, causing psutil to raise NotImplementedError.
+# sys.platform.
 try:
     import HeatSync  # noqa: E402, F401
 except Exception as _hs_err:
-    print(f"WARNING: could not pre-import HeatSync: {_hs_err}")  # shown in CI logs
+    print(f"WARNING: could not pre-import HeatSync: {_hs_err}")
+
+
+def pytest_collection_modifyitems(items):
+    """Skip Qt widget tests when Qt is not available in this environment."""
+    if not _QT_AVAILABLE:
+        for item in items:
+            if "qapp" in getattr(item, "fixturenames", []):
+                item.add_marker(pytest.mark.skip(reason="Qt not available in this environment"))
 
 
 @pytest.fixture
