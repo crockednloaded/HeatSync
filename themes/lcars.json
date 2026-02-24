@@ -1,0 +1,30 @@
+{
+  "name": "Star Trek LCARS",
+  "description": "LCARS (Library Computer Access/Retrieval System) style inspired by Star Trek: The Next Generation",
+  
+  "background": "#000000",
+  "card_background": "#0a0a0a",
+  "card_border": "#ffaa00",
+  
+  "text_high": "#ffff99",
+  "text_mid": "#ffaa00",
+  "text_low": "#664400",
+  
+  "primary": "#ffaa00",
+  "secondary": "#ff6600",
+  "accent": "#00ffff",
+  
+  "success": "#00ff00",
+  "warning": "#ffaa00",
+  "danger": "#ff3300",
+  
+  "track_bg": "#001a00",
+  "track_border": "#1a1a1a",
+  
+  "lcars_orange": "#ffaa00",
+  "lcars_blue": "#0088ff",
+  "lcars_red": "#ff3300",
+  "lcars_yellow": "#ffff00",
+  "lcars_cyan": "#00ffff",
+  "lcars_green": "#00ff00"
+}

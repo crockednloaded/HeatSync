@@ -1,0 +1,28 @@
+{
+  "name": "Default (NZXT CAM Style)",
+  "description": "Original HeatSync theme inspired by NZXT CAM",
+  
+  "background": "#090b10",
+  "card_background": "#0e1018",
+  "card_border": "#1a1d2b",
+  
+  "text_high": "#e5e8f0",
+  "text_mid": "#848ba0",
+  "text_low": "#404560",
+  
+  "primary": "#00ccdd",
+  "secondary": "#9d6fff",
+  "accent": "#00e676",
+  
+  "success": "#00e676",
+  "warning": "#ffa040",
+  "danger": "#f44336",
+  
+  "track_bg": "#1c1f2e",
+  "track_border": "#1a1d2b",
+  
+  "cyan": "#00ccdd",
+  "green": "#00e676",
+  "purple": "#9d6fff",
+  "amber": "#ffa040"
+}
