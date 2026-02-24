@@ -8,7 +8,7 @@ cd "$SCRIPT_DIR"
 echo "=== HeatSync Installer ==="
 
 # ── Python version check ───────────────────────────────────────────────────────
-echo "[0/3] Checking Python version..."
+echo "[0/4] Checking Python version..."
 if ! command -v python3 &>/dev/null; then
     echo "ERROR: python3 not found. Install Python 3.10 or later and retry."
     exit 1
@@ -26,7 +26,7 @@ fi
 echo "      Python $PY_VER OK"
 
 # ── Virtual environment ────────────────────────────────────────────────────────
-echo "[1/3] Creating Python virtual environment..."
+echo "[1/4] Creating Python virtual environment..."
 if ! python3 -m venv .venv 2>/dev/null; then
     echo "ERROR: Failed to create venv."
     # Detect distro and give a targeted fix hint
@@ -46,7 +46,7 @@ fi
 echo "      Virtual environment created at .venv/"
 
 # ── Dependencies ───────────────────────────────────────────────────────────────
-echo "[2/3] Installing dependencies..."
+echo "[2/4] Installing dependencies..."
 .venv/bin/pip install --upgrade pip -q
 if ! .venv/bin/pip install -r requirements.txt -q; then
     echo "ERROR: pip install failed."
@@ -62,8 +62,41 @@ if ! .venv/bin/pip install -r requirements.txt -q; then
 fi
 echo "      Dependencies installed."
 
+# ── AppImage download ─────────────────────────────────────────────────────────
+echo "[3/4] Downloading latest HeatSync AppImage..."
+if command -v curl &>/dev/null; then
+    DL_CMD="curl -fsSL"
+    DL_FILE="curl -L --progress-bar -o"
+elif command -v wget &>/dev/null; then
+    DL_CMD="wget -qO-"
+    DL_FILE="wget --show-progress -O"
+else
+    echo "      WARNING: neither curl nor wget found — skipping AppImage download."
+    DL_CMD=""
+fi
+
+if [ -n "$DL_CMD" ]; then
+    API_URL="https://api.github.com/repos/crockednloaded/HeatSync/releases/latest"
+    APPIMAGE_URL=$(${DL_CMD} "$API_URL" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+for a in data.get('assets', []):
+    if a['name'].endswith('.AppImage'):
+        print(a['browser_download_url'])
+        break
+" 2>/dev/null)
+
+    if [ -n "$APPIMAGE_URL" ]; then
+        ${DL_FILE} "$SCRIPT_DIR/HeatSync.AppImage" "$APPIMAGE_URL"
+        chmod +x "$SCRIPT_DIR/HeatSync.AppImage"
+        echo "      AppImage downloaded: HeatSync.AppImage"
+    else
+        echo "      WARNING: Could not fetch AppImage URL — check your internet connection."
+    fi
+fi
+
 # ── Autostart (XDG-compliant: KDE, GNOME, Cinnamon, MATE, LXQt, ...) ──────────
-echo "[3/3] Setting up autostart..."
+echo "[4/4] Setting up autostart..."
 AUTOSTART_DIR="$HOME/.config/autostart"
 mkdir -p "$AUTOSTART_DIR"
 PYTHON_PATH="$SCRIPT_DIR/.venv/bin/python"
@@ -87,3 +120,4 @@ echo ""
 echo "=== Done! ==="
 echo "Run HeatSync with:  bash run.sh"
 echo "Or directly:        .venv/bin/python HeatSync.py"
+echo "Or AppImage:        ./HeatSync.AppImage"
