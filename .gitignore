@@ -15,8 +15,9 @@ build/
 *.egg-info/
 *.spec
 
-# PyInstaller
+# PyInstaller / packaged builds
 *.exe
+*.AppImage
 
 # OS
 .DS_Store
