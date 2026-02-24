@@ -263,9 +263,69 @@ jobs:
           path: HeatSync.AppImage
           retention-days: 5
 
+  build-macos:
+    name: 🍎 Build macOS DMG
+    runs-on: macos-latest
+    needs: versioner
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+
+      - name: Install dependencies + PyInstaller
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Inject version into source
+        run: |
+          sed -i '' 's/return "v[^"]*"  # fallback — replaced by CI before build/return "v${{ needs.versioner.outputs.version }}"  # fallback — replaced by CI before build/' HeatSync.py
+
+      - name: Convert icon to icns
+        run: |
+          mkdir -p HeatSync.iconset
+          sips -z 16  16  assets/icon.png --out HeatSync.iconset/icon_16x16.png
+          sips -z 32  32  assets/icon.png --out HeatSync.iconset/icon_16x16@2x.png
+          sips -z 32  32  assets/icon.png --out HeatSync.iconset/icon_32x32.png
+          sips -z 64  64  assets/icon.png --out HeatSync.iconset/icon_32x32@2x.png
+          sips -z 128 128 assets/icon.png --out HeatSync.iconset/icon_128x128.png
+          sips -z 256 256 assets/icon.png --out HeatSync.iconset/icon_128x128@2x.png
+          sips -z 256 256 assets/icon.png --out HeatSync.iconset/icon_256x256.png
+          sips -z 512 512 assets/icon.png --out HeatSync.iconset/icon_256x256@2x.png
+          sips -z 512 512 assets/icon.png --out HeatSync.iconset/icon_512x512.png
+          iconutil -c icns HeatSync.iconset -o assets/icon.icns
+
+      - name: Build macOS app bundle
+        run: |
+          pyinstaller \
+            --windowed \
+            --name HeatSync \
+            --icon assets/icon.icns \
+            --add-data "assets:assets" \
+            HeatSync.py
+
+      - name: Package as DMG
+        run: |
+          hdiutil create \
+            -volname "HeatSync" \
+            -srcfolder dist/HeatSync.app \
+            -ov -format UDZO \
+            HeatSync.dmg
+          ls -lah HeatSync.dmg
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: HeatSync-macOS-${{ needs.versioner.outputs.version }}
+          path: HeatSync.dmg
+          retention-days: 5
+
   release:
     name: 🚀 Create GitHub Release
-    needs: [build-windows, build-linux, versioner]
+    needs: [build-windows, build-linux, build-macos, versioner]
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
     permissions:
@@ -281,7 +341,7 @@ jobs:
       - name: Organize release files
         run: |
           mkdir -p release-files
-          find release-artifacts -type f \( -name "HeatSync.exe" -o -name "HeatSync.AppImage" \) -exec cp {} release-files/ \;
+          find release-artifacts -type f \( -name "HeatSync.exe" -o -name "HeatSync.AppImage" -o -name "HeatSync.dmg" \) -exec cp {} release-files/ \;
           ls -lah release-files/
 
       - name: Import GPG signing key
@@ -297,7 +357,7 @@ jobs:
         env:
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
         run: |
-          for f in release-files/HeatSync.exe release-files/HeatSync.AppImage; do
+          for f in release-files/HeatSync.exe release-files/HeatSync.AppImage release-files/HeatSync.dmg; do
             if [ -f "$f" ]; then
               echo "$GPG_PASSPHRASE" | gpg --batch --yes --passphrase-fd 0 \
                 --pinentry-mode loopback --detach-sign --armor "$f"
@@ -317,7 +377,7 @@ jobs:
           tag_name: "v${{ needs.versioner.outputs.version }}"
           name: "HeatSync v${{ needs.versioner.outputs.version }}"
           body: |
-            ## HeatSync — Real-time system monitor for Linux & Windows
+            ## HeatSync — Real-time system monitor for Linux, Windows & macOS
 
             ### 📥 Downloads
 
@@ -334,6 +394,12 @@ jobs:
             ./HeatSync.AppImage
             ```
 
+            **macOS:**
+            ```bash
+            curl -L -o HeatSync.dmg https://github.com/${{ github.repository }}/releases/download/v${{ needs.versioner.outputs.version }}/HeatSync.dmg
+            open HeatSync.dmg
+            ```
+
             Or clone and run:
             ```bash
             git clone https://github.com/${{ github.repository }}.git
@@ -344,6 +410,7 @@ jobs:
             ### ℹ️ About This Release
             - **Windows**: Standalone EXE — no installation required, just run it
             - **Linux**: AppImage — works on most distributions (Ubuntu 18.04+, Fedora 32+, etc.)
+            - **macOS**: DMG — drag HeatSync.app to Applications (Apple Silicon)
             - **Version**: `${{ needs.versioner.outputs.version }}`
             - **Build**: #${{ github.run_number }}
 
