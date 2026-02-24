@@ -15,7 +15,10 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 # sys.platform. Without this, a test that patches sys.platform='win32' and then
 # does "from HeatSync import X" triggers a fresh import of HeatSync+psutil under
 # the patched platform, causing psutil to raise NotImplementedError.
-import HeatSync  # noqa: E402, F401
+try:
+    import HeatSync  # noqa: E402, F401
+except Exception as _hs_err:
+    print(f"WARNING: could not pre-import HeatSync: {_hs_err}")  # shown in CI logs
 
 
 @pytest.fixture
