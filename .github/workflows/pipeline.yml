@@ -155,7 +155,6 @@ jobs:
             HeatSync.py
 
       - name: Sign EXE with Authenticode (SignPath.io)
-        if: ${{ secrets.SIGNPATH_API_TOKEN != '' }}
         uses: signpath/github-action-submit-signing-request@v1.1
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
@@ -285,7 +284,6 @@ jobs:
           ls -lah release-files/
 
       - name: Import GPG signing key
-        if: ${{ secrets.GPG_PRIVATE_KEY != '' }}
         env:
           GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
@@ -295,7 +293,6 @@ jobs:
             --list-secret-keys
 
       - name: Sign release artifacts with GPG
-        if: ${{ secrets.GPG_PRIVATE_KEY != '' }}
         env:
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
         run: |
