@@ -48,7 +48,23 @@ from PyQt6.QtGui   import (
 )
 
 # ── Version ───────────────────────────────────────────────────────────────────
-VERSION = "v1.0.21"
+def _get_version() -> str:
+    """Read version from git tags at runtime; fall back to the hardcoded value
+    (which CI replaces before packaging the standalone EXE / AppImage)."""
+    try:
+        r = subprocess.run(
+            ["git", "describe", "--tags", "--abbrev=0"],
+            capture_output=True, text=True, timeout=3, cwd=_SCRIPT_DIR,
+        )
+        if r.returncode == 0:
+            tag = r.stdout.strip()
+            if tag:
+                return tag
+    except Exception:
+        pass
+    return "v1.0.22"  # fallback — replaced by CI before build
+
+VERSION = _get_version()
 
 # ── Platform flags ────────────────────────────────────────────────────────────
 IS_WINDOWS = sys.platform == "win32"
