@@ -80,10 +80,17 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
+            xvfb \
             libgl1 \
             libglib2.0-0 \
             libxkbcommon-x11-0 \
-            libdbus-1-3
+            libdbus-1-3 \
+            libxcb-cursor0 \
+            libxcb-icccm4 \
+            libxcb-image0 \
+            libxcb-keysyms1 \
+            libxcb-render-util0 \
+            libxcb-shape0
 
       - name: Install dependencies
         run: |
@@ -91,17 +98,9 @@ jobs:
           pip install -r requirements.txt
           pip install pytest pytest-cov pytest-mock
 
-      - name: Verify HeatSync import
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: |
-          python -c "import HeatSync; print('HeatSync import OK, VERSION=', HeatSync.VERSION)"
-
       - name: Run unit and integration tests
-        env:
-          QT_QPA_PLATFORM: offscreen
         run: |
-          pytest tests/ -v --cov=HeatSync --cov-report=xml --cov-report=term
+          xvfb-run -a pytest tests/ -v --cov=HeatSync --cov-report=xml --cov-report=term
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v3
