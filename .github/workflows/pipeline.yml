@@ -91,11 +91,17 @@ jobs:
           pip install -r requirements.txt
           pip install pytest pytest-cov pytest-mock
 
+      - name: Verify HeatSync import
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          python -c "import HeatSync; print('HeatSync import OK, VERSION=', HeatSync.VERSION)"
+
       - name: Run unit and integration tests
         env:
           QT_QPA_PLATFORM: offscreen
         run: |
-          pytest tests/ -v --cov=. --cov-report=xml --cov-report=term
+          pytest tests/ -v --cov=HeatSync --cov-report=xml --cov-report=term
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v3
