@@ -8,6 +8,7 @@ https://github.com/crockednloaded/HeatSync
 import sys
 import os
 import glob
+import json
 import math
 import socket
 import warnings
@@ -20,7 +21,8 @@ from datetime import datetime
 
 # ── Venv auto-reexec ─────────────────────────────────────────────────────────
 # Prefer a local .venv in the script directory; fall back to ~/.sysmon_venv.
-_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_SCRIPT_DIR    = os.path.dirname(os.path.abspath(__file__))
+_SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".heatsync.json")
 if sys.platform == "win32":
     _VENV_PY = os.path.join(_SCRIPT_DIR, ".venv", "Scripts", "python.exe")
 else:
@@ -42,10 +44,10 @@ from PyQt6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QFrame, QSizePolicy,
     QGraphicsDropShadowEffect, QSystemTrayIcon, QMenu,
 )
-from PyQt6.QtCore  import Qt, QTimer, QRectF, QPointF
+from PyQt6.QtCore  import Qt, QTimer, QRectF, QPointF, QLoggingCategory
 from PyQt6.QtGui   import (
     QPainter, QColor, QPen, QFont, QPainterPath,
-    QLinearGradient, QBrush, QPalette,
+    QLinearGradient, QRadialGradient, QBrush, QPalette,
     QIcon, QPixmap,
 )
 
@@ -163,6 +165,11 @@ AMBER  = "#ffa040"
 C_WARN = "#ff9800"
 C_DANG = "#f44336"
 
+# Hardware vendor brand colors
+NVIDIA_GREEN = "#76b900"
+AMD_RED      = "#ed1c24"
+INTEL_BLUE   = "#0071c5"
+
 # ── Font helper ──────────────────────────────────────────────────────────────
 _FONT_FAMILIES = ["JetBrainsMono NF", "JetBrainsMono Nerd Font", "JetBrains Mono",
                   "Consolas", "Hack", "Fira Mono", "Fira Sans", "Sans Serif"]
@@ -203,6 +210,23 @@ def _get_cpu_name() -> str:
     except Exception:
         pass
     return platform.processor() or "CPU"
+
+def _cpu_vendor_color() -> str:
+    name = _get_cpu_name().upper()
+    if any(k in name for k in ("AMD", "RYZEN", "EPYC", "ATHLON", "THREADRIPPER")):
+        return AMD_RED
+    if any(k in name for k in ("INTEL", "CORE", "XEON", "PENTIUM", "CELERON", "I3", "I5", "I7", "I9")):
+        return INTEL_BLUE
+    return CYAN
+
+def _gpu_vendor_color() -> str:
+    if GPU_HANDLE:   return NVIDIA_GREEN
+    if _AMD_DEV:     return AMD_RED
+    if _INTEL_DEV:   return INTEL_BLUE
+    return PURPLE
+
+CPU_COLOR = _cpu_vendor_color()
+GPU_COLOR = _gpu_vendor_color()
 
 # ── Sensors ──────────────────────────────────────────────────────────────────
 psutil.cpu_percent()   # prime — first call is always 0.0
@@ -376,7 +400,7 @@ def s_disk():
 class ArcGauge(QWidget):
     _DEG_START = 240
     _DEG_SPAN  = -300
-    _HALOS = ((14, 10), (9, 22), (6, 40))
+    _HALOS = ((10, 8), (7, 20), (5, 38))
 
     def __init__(self, label, unit, lo=0, hi=100, color=CYAN, warn=75, danger=90):
         super().__init__()
@@ -432,41 +456,124 @@ class ArcGauge(QWidget):
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setBrush(Qt.BrushStyle.NoBrush)
 
-        trk = QPen(QColor("#1c1f2e"), 3); trk.setCapStyle(Qt.PenCapStyle.FlatCap)
-        p.setPen(trk); p.drawArc(rect, a0, a_end)
+        # ── Outer bezel — dark frame ring that gives the gauge depth ─────
+        bezel_rect = rect.adjusted(-5, -5, 5, 5)
+        bezel_grad = QRadialGradient(cx, cy, r2 + 5)
+        bezel_grad.setColorAt(0,   QColor("#141624"))
+        bezel_grad.setColorAt(0.8, QColor("#09090f"))
+        bezel_grad.setColorAt(1.0, QColor("#040406"))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(bezel_grad))
+        p.drawEllipse(bezel_rect)
+        # Thin metallic outer edge
+        p.setPen(QPen(QColor(55, 60, 85, 110), 1.2))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawEllipse(bezel_rect)
+        # Accent inner trim where bezel meets face
+        trim = QColor(col); trim.setAlpha(28)
+        p.setPen(QPen(trim, 1.0))
+        p.drawEllipse(rect.adjusted(1, 1, -1, -1))
 
+        # ── Gauge face — very dark, near-black with subtle depth ─────────
+        face_grad = QRadialGradient(cx, cy - r2 * 0.15, r2)
+        face_grad.setColorAt(0,    QColor("#0d1020"))
+        face_grad.setColorAt(0.55, QColor("#080a13"))
+        face_grad.setColorAt(1.0,  QColor("#030406"))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(face_grad))
+        p.drawEllipse(rect.adjusted(1, 1, -1, -1))
+        # Glass highlight — very faint white sheen at the top
+        hi = QRadialGradient(cx, cy - r2 * 0.55, r2 * 0.5)
+        hi.setColorAt(0, QColor(255, 255, 255, 12))
+        hi.setColorAt(1, QColor(0, 0, 0, 0))
+        p.setBrush(QBrush(hi))
+        p.drawEllipse(rect.adjusted(1, 1, -1, -1))
+        # Inner vignette — darkens face edges for a concave look
+        vig = QRadialGradient(cx, cy, r2 * 0.72)
+        vig.setColorAt(0,   QColor(0, 0, 0, 0))
+        vig.setColorAt(0.6, QColor(0, 0, 0, 0))
+        vig.setColorAt(1.0, QColor(0, 0, 0, 70))
+        p.setBrush(QBrush(vig))
+        p.drawEllipse(rect.adjusted(1, 1, -1, -1))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+
+        # ── Arc track (inset so tick marks have room in the outer ring) ───
+        inset    = 12
+        trk_w    = 6
+        arc_rect = rect.adjusted(inset, inset, -inset, -inset)
+        arc_r2   = r2 - inset
+        trk = QPen(QColor("#0d1020"), trk_w); trk.setCapStyle(Qt.PenCapStyle.FlatCap)
+        p.setPen(trk); p.drawArc(arc_rect, a0, a_end)
+
+        # ── Tick marks in the ring between face rim and arc track ─────────
+        t_outer = r2 - 2.5
+        for i in range(21):        # 0..20 → every 5% → majors at 0,25,50,75,100
+            t       = i / 20.0
+            is_maj  = (i % 5 == 0)
+            ang_rad = math.radians(self._DEG_START + self._DEG_SPAN * t)
+            ca, sa  = math.cos(ang_rad), math.sin(ang_rad)
+            t_len   = 6.5 if is_maj else 3.5
+            t_inner = t_outer - t_len
+            if is_maj:
+                tc = QColor(col) if t <= pct + 0.03 else QColor(TXT_LO)
+                tc.setAlpha(190)
+                pw = 1.5
+            else:
+                tc = QColor(TXT_LO); tc.setAlpha(80)
+                pw = 1.0
+            p.setPen(QPen(tc, pw, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+            p.drawLine(QPointF(cx + t_outer * ca, cy - t_outer * sa),
+                       QPointF(cx + t_inner * ca, cy - t_inner * sa))
+
+        # ── Colored fill arc + glow ───────────────────────────────────────
         if pct > 5e-3:
             for pw, al in self._HALOS:
                 c = QColor(col); c.setAlpha(al)
                 pk = QPen(c, pw); pk.setCapStyle(Qt.PenCapStyle.FlatCap)
-                p.setPen(pk); p.drawArc(rect, a0, a_val)
-            pk = QPen(col, 3); pk.setCapStyle(Qt.PenCapStyle.RoundCap)
-            p.setPen(pk); p.drawArc(rect, a0, a_val)
+                p.setPen(pk); p.drawArc(arc_rect, a0, a_val)
+            pk = QPen(col, trk_w); pk.setCapStyle(Qt.PenCapStyle.RoundCap)
+            p.setPen(pk); p.drawArc(arc_rect, a0, a_val)
+
             tip_ang = math.radians(self._DEG_START + self._DEG_SPAN * pct)
-            tip_x   = cx + r2 * math.cos(tip_ang)
-            tip_y   = cy - r2 * math.sin(tip_ang)
-            for dr, da in ((8, 15), (5, 50), (2.5, 230)):
+            tip_x   = cx + arc_r2 * math.cos(tip_ang)
+            tip_y   = cy - arc_r2 * math.sin(tip_ang)
+            for dr, da in ((8, 18), (5, 60), (2.5, 240)):
                 c = QColor(col); c.setAlpha(da)
                 p.setPen(Qt.PenStyle.NoPen); p.setBrush(QBrush(c))
                 p.drawEllipse(QPointF(tip_x, tip_y), dr, dr)
             p.setBrush(Qt.BrushStyle.NoBrush)
 
+        # ── Needle — drawn BEFORE text so value stays readable on top ────
+        n_ang = math.radians(self._DEG_START + self._DEG_SPAN * pct)
+        n_r   = arc_r2 - trk_w / 2 - 1
+        n_tx  = cx + n_r * math.cos(n_ang)
+        n_ty  = cy - n_r * math.sin(n_ang)
+        # Hub glow (behind text)
+        for dr, da in ((7, 30), (4.5, 80), (2.5, 200)):
+            c = QColor(col); c.setAlpha(da)
+            p.setPen(Qt.PenStyle.NoPen); p.setBrush(QBrush(c))
+            p.drawEllipse(QPointF(cx, cy), dr, dr)
+        # Needle line (behind text)
+        p.setPen(QPen(QColor(col), 1.8, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        p.drawLine(QPointF(cx, cy), QPointF(n_tx, n_ty))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+
+        # ── Value text — shifted below hub so the needle doesn't cross it ─
+        # Text rect starts at cy so the hub (at cy) is above the glyphs.
         val_str = f"{self._cur:.0f}{self._unit}"
-        blend   = 0.25
-        col_rgb = (col.red(), col.green(), col.blue())
-        val_col = QColor(
-            min(255, int(229 * (1 - blend) + col_rgb[0] * blend)),
-            min(255, int(232 * (1 - blend) + col_rgb[1] * blend)),
-            min(255, int(240 * (1 - blend) + col_rgb[2] * blend)),
-        )
         fs = max(10, int(side * 0.22 * (4 / max(len(val_str), 4))))
-        p.setFont(_font(fs, bold=True)); p.setPen(val_col)
-        p.drawText(QRectF(0, cy - side * 0.17, W, side * 0.34),
+        p.setFont(_font(fs, bold=True)); p.setPen(QColor(TXT_HI))
+        p.drawText(QRectF(0, cy, W, side * 0.28),
                    Qt.AlignmentFlag.AlignCenter, val_str)
 
-        p.setFont(_font(max(8, int(side * 0.085)))); p.setPen(QColor(TXT_MID))
-        p.drawText(QRectF(0, cy + side * 0.20, W, side * 0.18),
+        p.setFont(_font(max(8, int(side * 0.085)))); p.setPen(QColor(TXT_HI))
+        p.drawText(QRectF(0, cy + side * 0.28, W, side * 0.14),
                    Qt.AlignmentFlag.AlignCenter, self._label)
+
+        # Hub cap — drawn last so the tiny center dot is always crisp
+        p.setBrush(QBrush(QColor(CARD_BG)))
+        p.setPen(QPen(QColor(col), 0.8))
+        p.drawEllipse(QPointF(cx, cy), 3.5, 3.5)
         p.end()
 
 
@@ -563,8 +670,14 @@ class Sparkline(QWidget):
             pad = 4
             bw  = fm.horizontalAdvance(label) + pad * 2
             bh  = fm.height() + pad * 2
-            bx  = min(max(hp.x() - bw / 2, 0), W - bw)
-            by  = 2
+            # Position beside cursor (not above the vertical line) so it
+            # doesn't obscure the data point or the hover line.
+            off = 10
+            if hp.x() + off + bw < W:
+                bx = hp.x() + off
+            else:
+                bx = max(0.0, hp.x() - bw - off)
+            by  = max(2.0, min(hp.y() - bh - 6, float(H - bh - 2)))
             bg  = QColor(CARD_BG); bg.setAlpha(210)
             p.setPen(Qt.PenStyle.NoPen); p.setBrush(QBrush(bg))
             p.drawRoundedRect(QRectF(bx, by, bw, bh), 4, 4)
@@ -604,16 +717,41 @@ class MonitorCard(QFrame):
     def paintEvent(self, _e):
         p = QPainter(self); p.setRenderHint(QPainter.RenderHint.Antialiasing)
         r = QRectF(self.rect()).adjusted(1, 1, -1, -1); R = self._R
-        p.setPen(Qt.PenStyle.NoPen); p.setBrush(QBrush(QColor(CARD_BG)))
+
+        # Base fill
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(QColor(CARD_BG)))
         p.drawRoundedRect(r, R, R)
-        grad = QLinearGradient(0, 0, 0, 72)
-        c0 = QColor(self._accent); c0.setAlpha(38)
-        c1 = QColor(self._accent); c1.setAlpha(0)
-        grad.setColorAt(0, c0); grad.setColorAt(1, c1)
-        p.setBrush(QBrush(grad)); p.drawRoundedRect(r, R, R)
-        bc = QColor(self._accent); bc.setAlpha(55)
-        p.setPen(QPen(bc, 1)); p.setBrush(Qt.BrushStyle.NoBrush)
-        p.drawRoundedRect(r, R, R); p.end()
+
+        # Top gradient — dark blue-grey tint that fades to transparent
+        top_grad = QLinearGradient(0, r.y(), 0, r.y() + 90)
+        top_grad.setColorAt(0, QColor("#181c2e"))
+        top_grad.setColorAt(1, QColor(0, 0, 0, 0))
+        p.setBrush(QBrush(top_grad))
+        p.drawRoundedRect(r, R, R)
+
+        # Bottom darkening for depth
+        bot_grad = QLinearGradient(0, r.bottom() - 50, 0, r.bottom())
+        bot_grad.setColorAt(0, QColor(0, 0, 0, 0))
+        bot_grad.setColorAt(1, QColor(0, 0, 0, 50))
+        p.setBrush(QBrush(bot_grad))
+        p.drawRoundedRect(r, R, R)
+
+        # Glass sheen — very faint white shimmer at the top edge
+        sheen = QLinearGradient(0, r.y(), 0, r.y() + 28)
+        sheen.setColorAt(0, QColor(255, 255, 255, 16))
+        sheen.setColorAt(1, QColor(255, 255, 255, 0))
+        p.setBrush(QBrush(sheen))
+        p.drawRoundedRect(r, R, R)
+
+        # Outer border — uniform dark blue-grey, slightly lighter at top
+        border_grad = QLinearGradient(0, r.y(), 0, r.bottom())
+        border_grad.setColorAt(0, QColor("#2e3248"))
+        border_grad.setColorAt(1, QColor("#181b28"))
+        p.setPen(QPen(QBrush(border_grad), 1.5))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawRoundedRect(r, R, R)
+        p.end()
 
 
 # ── Status Bar ───────────────────────────────────────────────────────────────
@@ -628,7 +766,7 @@ class StatusBar(QWidget):
         for key in ("RAM", "VRAM", "CPU Freq", "Threads", "Disk"):
             lb = QLabel(f"{key}: –")
             lb.setFont(_font(12))
-            lb.setStyleSheet(f"color: {TXT_MID}; background: transparent;")
+            lb.setStyleSheet(f"color: {TXT_HI}; background: transparent;")
             self._lbs[key] = lb; lay.addWidget(lb)
         lay.addStretch()
 
@@ -726,7 +864,7 @@ class ResizeGrip(QWidget):
 
 # ── Title / Drag Bar ──────────────────────────────────────────────────────────
 class TitleBar(QWidget):
-    def __init__(self, parent_win):
+    def __init__(self, parent_win, cpu_color=None, gpu_color=None):
         super().__init__(parent_win)
         self._win = parent_win
         self._last_press_ms = 0.0
@@ -736,34 +874,61 @@ class TitleBar(QWidget):
         self.setCursor(Qt.CursorShape.SizeAllCursor)
 
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(20, 0, 14, 0); lay.setSpacing(0)
+        lay.setContentsMargins(14, 0, 14, 0); lay.setSpacing(0)
 
-        title = QLabel(f"◈  HEATSYNC")
+        # App icon with black border circle
+        icon_path = os.path.join(_SCRIPT_DIR, "assets", "icon.png")
+        if os.path.exists(icon_path):
+            src = QPixmap(icon_path).scaled(
+                26, 26,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            bordered = QPixmap(34, 34)
+            bordered.fill(Qt.GlobalColor.transparent)
+            bp = QPainter(bordered)
+            bp.setRenderHint(QPainter.RenderHint.Antialiasing)
+            bp.setPen(Qt.PenStyle.NoPen)
+            bp.setBrush(QBrush(QColor(0, 0, 0, 170)))
+            bp.drawEllipse(QRectF(0, 0, 34, 34))
+            bp.drawPixmap(4, 4, src)
+            bp.end()
+            icon_lbl = QLabel()
+            icon_lbl.setPixmap(bordered)
+            icon_lbl.setFixedSize(34, 34)
+            icon_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            icon_lbl.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+            lay.addWidget(icon_lbl)
+            lay.addSpacing(8)
+
+        title = QLabel("HEATSYNC")
         title.setFont(_font(17, bold=True))
         title.setStyleSheet(f"color: {CYAN}; letter-spacing: 3px; background: transparent;")
 
         ver_lbl = QLabel(VERSION)
         ver_lbl.setFont(_font(10))
-        ver_lbl.setStyleSheet(f"color: {TXT_LO}; background: transparent;")
+        ver_lbl.setStyleSheet(f"color: {TXT_HI}; background: transparent;")
         ver_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
-        # CPU + GPU names stacked vertically so they never get clipped
-        cpu_name = _get_cpu_name()
+        # CPU + GPU names stacked vertically — vendor brand colors
+        cpu_name  = _get_cpu_name()
+        cpu_col   = cpu_color or TXT_MID
+        gpu_col   = gpu_color or TXT_MID
         hw_box = QWidget()
         hw_box.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         hw_box.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         hw_v = QVBoxLayout(hw_box)
         hw_v.setContentsMargins(10, 0, 0, 0); hw_v.setSpacing(1)
-        for hw_text in (cpu_name, GPU_NAME):
+        for hw_text, hw_col in ((cpu_name, cpu_col), (GPU_NAME, gpu_col)):
             lbl = QLabel(hw_text)
             lbl.setFont(_font(11))
-            lbl.setStyleSheet(f"color: {TXT_LO}; background: transparent;")
+            lbl.setStyleSheet(f"color: {hw_col}; background: transparent;")
             lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
             hw_v.addWidget(lbl)
 
         self._clk = QLabel()
         self._clk.setFont(_font(14))
-        self._clk.setStyleSheet(f"color: {TXT_MID}; background: transparent;")
+        self._clk.setStyleSheet(f"color: {TXT_HI}; background: transparent;")
         self._tick()
         t = QTimer(self); t.timeout.connect(self._tick); t.start(1000)
 
@@ -783,7 +948,9 @@ class TitleBar(QWidget):
         lay.addWidget(btn_min); lay.addSpacing(8); lay.addWidget(btn_cls)
 
     def _tick(self):
-        self._clk.setText(datetime.now().strftime("%I:%M:%S %p   %a %d %b %Y"))
+        now  = datetime.now()
+        hour = now.hour % 12 or 12   # 12-hour, no leading zero
+        self._clk.setText(now.strftime(f"{hour}:%M:%S %p   %a %d %b %Y"))
 
     def mousePressEvent(self, e):
         if e.button() == Qt.MouseButton.LeftButton:
@@ -855,11 +1022,14 @@ class MainWindow(QMainWindow):
                 Qt.WindowType.FramelessWindowHint | Qt.WindowType.Tool
             )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setMinimumSize(880, 480)
+        self.setMinimumSize(880, 520)
         self.resize(1080, 540)
+        self._restore_pos()
 
         self._docked        = False
         self._pre_dock_geom = None
+        self._dock_info     = None   # set by toggle_dock() at dock time
+        self._last_pos      = None   # updated by moveEvent; used in _save_pos
 
         cw = _Background()
         self.setCentralWidget(cw)
@@ -867,7 +1037,7 @@ class MainWindow(QMainWindow):
         root = QVBoxLayout(cw)
         root.setContentsMargins(14, 8, 14, 12); root.setSpacing(8)
 
-        self._title_bar = TitleBar(self)
+        self._title_bar = TitleBar(self, cpu_color=CPU_COLOR, gpu_color=GPU_COLOR)
         root.addWidget(self._title_bar)
 
         div = QFrame(); div.setFixedHeight(1)
@@ -875,10 +1045,10 @@ class MainWindow(QMainWindow):
         root.addWidget(div)
 
         row = QHBoxLayout(); row.setSpacing(12)
-        self._cu = MonitorCard("CPU USAGE", "%",   0, 100, CYAN,   70, 90)
-        self._ct = MonitorCard("CPU TEMP",  "°C",  0, 105, GREEN,  80, 95)
-        self._gu = MonitorCard("GPU USAGE", "%",   0, 100, PURPLE, 70, 90)
-        self._gt = MonitorCard("GPU TEMP",  "°C",  0,  95, AMBER,  75, 88)
+        self._cu = MonitorCard("CPU USAGE", "%",   0, 100, CPU_COLOR, 70, 90)
+        self._ct = MonitorCard("CPU TEMP",  "°C",  0, 105, CPU_COLOR, 80, 95)
+        self._gu = MonitorCard("GPU USAGE", "%",   0, 100, GPU_COLOR, 70, 90)
+        self._gt = MonitorCard("GPU TEMP",  "°C",  0,  95, GPU_COLOR, 75, 88)
         for card in (self._cu, self._ct, self._gu, self._gt):
             row.addWidget(card)
         root.addLayout(row, 1)
@@ -901,10 +1071,12 @@ class MainWindow(QMainWindow):
             self._tray.setIcon(_make_tray_icon())
             self._tray.setToolTip(f"HeatSync {VERSION}")
             menu = QMenu()
-            menu.addAction("Show / Hide").triggered.connect(self._toggle_visibility)
+            self._tray_toggle_action = menu.addAction("Hide HeatSync")
+            self._tray_toggle_action.triggered.connect(self._toggle_visibility)
+            menu.addSeparator()
             menu.addAction("Quit").triggered.connect(QApplication.instance().quit)
+            menu.aboutToShow.connect(self._update_tray_menu)
             self._tray.setContextMenu(menu)
-            self._tray.activated.connect(self._tray_activated)
             self._tray.show()
         else:
             self._tray = None
@@ -913,23 +1085,166 @@ class MainWindow(QMainWindow):
         if IS_WAYLAND:
             QTimer.singleShot(600, self._kwin_skip_taskbar)
 
+        QApplication.instance().aboutToQuit.connect(self._save_pos)
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        # Enforce minimum size on frameless Wayland windows — the compositor
+        # may allow resizing below the hint when there are no decorations.
+        mw, mh = self.minimumWidth(), self.minimumHeight()
+        if self.width() < mw or self.height() < mh:
+            self.resize(max(self.width(), mw), max(self.height(), mh))
+
+    def _restore_pos(self):
+        """Load saved geometry from disk into _pending_restore.
+        Also preloads _dock_info so _save_pos() has correct dock coords
+        even before the user manually clicks the dock button."""
+        self._pending_restore = None
+        try:
+            with open(_SETTINGS_FILE) as f:
+                d = json.load(f)
+            if d.get("x") is not None and d.get("y") is not None:
+                self._pending_restore = d
+            if d.get("docked") and d.get("dock_x") is not None:
+                self._dock_info = {
+                    "dock_x": d["dock_x"],
+                    "dock_y": d["dock_y"],
+                    "dock_w": d.get("dock_w"),
+                }
+        except Exception:
+            pass
+
+    def moveEvent(self, event):
+        super().moveEvent(event)
+        p = event.pos()
+        # Ignore (0,0) — Wayland "not yet positioned" sentinel.
+        if p.x() == 0 and p.y() == 0:
+            return
+        self._last_pos = (p.x(), p.y())
+        # Auto-undock if the window moved significantly away from its dock
+        # position (user dragged without clicking the undock button).
+        # Comparing against _dock_info avoids false-triggering on the
+        # configure event that KWin sends after _kwin_set_geometry (which
+        # would land at exactly the dock_x/dock_y we requested).
+        if self._docked and self._dock_info:
+            dock_x = self._dock_info.get("dock_x", p.x())
+            dock_y = self._dock_info.get("dock_y", p.y())
+            if abs(p.x() - dock_x) > 50 or abs(p.y() - dock_y) > 50:
+                self._docked = False
+                cw = self.centralWidget()
+                if isinstance(cw, _Background):
+                    cw.set_squared(False)
+                self._title_bar.dock_btn.set_active(False)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        d = self._pending_restore
+        if not d:
+            return
+        self._pending_restore = None
+        self._apply_state(d, first_show=True)
+
+    def _apply_state(self, d, first_show=True):
+        """Apply saved geometry + dock state from a settings dict.
+
+        Uses _kwin_set_geometry (Wayland) to set position AND size atomically
+        in a single KWin script call, bypassing Qt's Wayland resize quirks.
+        Never calls toggle_dock() — that would re-query self.screen() which
+        may return the wrong screen after a KWin move.
+
+        first_show=True  → 700 ms delay (window being mapped for the first time)
+        first_show=False → 500 ms delay (re-show after tray hide; already known to KWin)
+        """
+        docked = d.get("docked", False)
+        x, y   = d.get("x"), d.get("y")
+        w, h   = d.get("w"), d.get("h")
+        dock_x = d.get("dock_x", x)
+        dock_y = d.get("dock_y", y)
+        dock_w = d.get("dock_w", w)
+        delay  = 700 if first_show else 500
+
+        def apply():
+            if docked:
+                dw = dock_w or w or self.width()
+                dh = h or self.height()
+                if IS_WAYLAND:
+                    self._kwin_set_geometry(dock_x, dock_y, dw, dh)
+                else:
+                    self.resize(dw, dh)
+                    self.move(dock_x, dock_y)
+                # Restore docked UI state if not already set.
+                if not self._docked:
+                    self._docked = True
+                    cw = self.centralWidget()
+                    if isinstance(cw, _Background):
+                        cw.set_squared(True)
+                    self._title_bar.dock_btn.set_active(True)
+            else:
+                if w and h:
+                    self.resize(w, h)
+                if x is not None and y is not None:
+                    if IS_WAYLAND:
+                        self._kwin_move(x, y)
+                    else:
+                        self.move(x, y)
+                    # Seed _last_pos so _save_pos() has accurate coords on
+                    # first hide even before the user drags the window.
+                    self._last_pos = (x, y)
+
+        QTimer.singleShot(delay if IS_WAYLAND else 0, apply)
+
+    def _save_pos(self):
+        try:
+            g = self.geometry()
+            # Prefer _last_pos (from moveEvent configure events) over geometry()
+            # because geometry() is stale on Wayland after startSystemMove().
+            if self._last_pos:
+                px, py = self._last_pos
+            else:
+                px, py = g.x(), g.y()
+            data = {
+                "x": px, "y": py,
+                "w": g.width(), "h": g.height(),
+                "docked": self._docked,
+            }
+            if self._docked and self._dock_info:
+                # Use coordinates captured at dock time — self.screen() can
+                # report the wrong screen at quit time on Wayland.
+                data.update(self._dock_info)
+            with open(_SETTINGS_FILE, "w") as f:
+                json.dump(data, f)
+        except Exception:
+            pass
+
+    def _update_tray_menu(self):
+        self._tray_toggle_action.setText(
+            "Hide HeatSync" if self.isVisible() else "Show HeatSync"
+        )
+
     def closeEvent(self, e):
         if self._tray and self._tray.isVisible():
+            self._save_pos()
             self.hide(); e.ignore()
         else:
+            self._save_pos()
             e.accept()
 
     def _toggle_visibility(self):
         if self.isVisible():
+            self._save_pos()
             self.hide()
         else:
             self.show(); self.raise_(); self.activateWindow()
             if IS_WAYLAND:
                 QTimer.singleShot(400, self._kwin_skip_taskbar)
-
-    def _tray_activated(self, reason):
-        if reason == QSystemTrayIcon.ActivationReason.Trigger:
-            self._toggle_visibility()
+                # On Wayland, KWin repositions the window on every re-show.
+                # Restore saved position/dock directly (no toggle_dock recalc).
+                # X11/Windows preserve position on hide/show — no action needed.
+                try:
+                    with open(_SETTINGS_FILE) as f:
+                        self._apply_state(json.load(f), first_show=False)
+                except Exception:
+                    pass
 
     # ── KWin scripting (Linux Wayland only) ───────────────────────────────────
     def _kwin_run(self, js: str, tag: str = "hs") -> bool:
@@ -996,6 +1311,20 @@ class MainWindow(QMainWindow):
             tag="hs_move",
         )
 
+    def _kwin_set_geometry(self, x: int, y: int, w: int, h: int) -> bool:
+        """Set HeatSync position AND size atomically via KWin scripting.
+        Bypasses Qt's Wayland resize quirks by going straight to the compositor."""
+        return self._kwin_run(
+            f"var wins = workspace.windowList();"
+            f"for (var i = 0; i < wins.length; i++) {{"
+            f"  if (wins[i].resourceClass === 'heatsync') {{"
+            f"    wins[i].frameGeometry = {{x:{x}, y:{y}, width:{w}, height:{h}}};"
+            f"    break;"
+            f"  }}"
+            f"}}",
+            tag="hs_geom",
+        )
+
     # ── Dock toggle ───────────────────────────────────────────────────────────
     def toggle_dock(self, via_drag: bool = False):
         cw = self.centralWidget()
@@ -1004,6 +1333,8 @@ class MainWindow(QMainWindow):
             ag = self.screen().availableGeometry()
             tx, ty = ag.x(), ag.y()
             self.resize(ag.width(), self.height())
+            # Capture dock coordinates now — self.screen() is reliable here.
+            self._dock_info = {"dock_x": tx, "dock_y": ty, "dock_w": ag.width()}
             if IS_WAYLAND:
                 QTimer.singleShot(250, lambda: self._kwin_move(tx, ty))
             else:
@@ -1062,6 +1393,8 @@ def main():
     app.setApplicationName("HeatSync")
     if IS_WAYLAND:
         app.setDesktopFileName("heatsync")   # sets Wayland app_id → KWin resourceClass
+        # Qt warns when heatsync.desktop isn't found in system paths (harmless).
+        QLoggingCategory.setFilterRules("qt.qpa.services.warning=false")
     app.setStyle("Fusion")
 
     pal = QPalette()
