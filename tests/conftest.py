@@ -8,14 +8,14 @@ from unittest.mock import Mock, patch, MagicMock
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Skip GUI tests in headless environments
-def is_headless():
-    """Check if running in headless environment (CI/CD)."""
-    return not os.environ.get("DISPLAY") and not os.environ.get("WAYLAND_DISPLAY")
+# Set offscreen Qt platform before any import so PyQt6 works headless in CI
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-pytestmark = []
-if is_headless():
-    pytestmark.append(pytest.mark.skip(reason="Headless environment - skipping GUI tests"))
+# Pre-import HeatSync so it is cached in sys.modules before any test patches
+# sys.platform. Without this, a test that patches sys.platform='win32' and then
+# does "from HeatSync import X" triggers a fresh import of HeatSync+psutil under
+# the patched platform, causing psutil to raise NotImplementedError.
+import HeatSync  # noqa: E402, F401
 
 
 @pytest.fixture
