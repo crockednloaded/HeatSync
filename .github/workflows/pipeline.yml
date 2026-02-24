@@ -187,20 +187,12 @@ jobs:
           Terminal=false
           EOF
 
-          # Copy icon if available, otherwise create minimal placeholder using Python
+          # Copy icon if available
           if [ -f "assets/icon.png" ]; then
             cp assets/icon.png AppDir/usr/share/icons/hicolor/256x256/apps/heatsync.png
+            echo "Icon found and copied"
           else
-            echo "Creating placeholder icon..."
-            python3 << 'PYSCRIPT'
-            import os
-            try:
-                from PIL import Image
-                img = Image.new('RGB', (256, 256), color='#1a1a2e')
-                img.save('AppDir/usr/share/icons/hicolor/256x256/apps/heatsync.png')
-            except ImportError:
-                os.system('convert -size 256x256 xc:"#1a1a2e" AppDir/usr/share/icons/hicolor/256x256/apps/heatsync.png')
-            PYSCRIPT
+            echo "No icon.png found in assets/ - AppImage will build without icon"
           fi
 
           ./linuxdeploy-x86_64.AppImage \
