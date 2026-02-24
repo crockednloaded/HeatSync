@@ -9,6 +9,7 @@ import sys
 import os
 import glob
 import math
+import socket
 import warnings
 import subprocess
 import shutil
@@ -28,11 +29,8 @@ else:
     if not os.path.exists(_VENV_PY) and os.path.exists(_VENV_PY_LEGACY):
         _VENV_PY = _VENV_PY_LEGACY
 
-if sys.executable != _VENV_PY and os.path.exists(_VENV_PY):
-    try:
-        import pynvml  # noqa: F401
-    except ImportError:
-        os.execv(_VENV_PY, [_VENV_PY] + sys.argv)
+if os.path.exists(_VENV_PY) and os.path.abspath(sys.executable) != os.path.abspath(_VENV_PY):
+    os.execv(_VENV_PY, [_VENV_PY] + sys.argv)
 
 from collections import deque
 
@@ -75,79 +73,59 @@ try:
 except Exception:
     pass
 
-# Try AMD if no NVIDIA found (Linux only — uses amdgpu kernel driver sysfs)
+# Try AMD/Intel if no NVIDIA found (Linux only — uses kernel driver sysfs)
 if not GPU_HANDLE and sys.platform == "linux":
+    def _gpu_name_from_sysfs(card: str, fallback: str) -> str:
+        try:
+            with open(os.path.join(card, "product_name")) as f:
+                n = f.read().strip()
+                if n: return n
+        except Exception:
+            pass
+        try:
+            with open(os.path.join(card, "uevent")) as f:
+                slot = next((l.split("=",1)[1].strip() for l in f
+                             if l.startswith("PCI_SLOT_NAME=")), None)
+            if slot:
+                r = subprocess.run(["lspci", "-s", slot],
+                                   capture_output=True, text=True, timeout=3)
+                if r.returncode == 0:
+                    parts = r.stdout.strip().split(":", 2)
+                    if len(parts) >= 3:
+                        return parts[2].strip()
+        except Exception:
+            pass
+        return fallback
+
+    # Collect all DRM cards with their vendor IDs
+    _cards: list[tuple[str, str]] = []
     for _card in sorted(glob.glob("/sys/class/drm/card*/device")):
         try:
             with open(os.path.join(_card, "vendor")) as _f:
-                _vendor = _f.read().strip()
-                if _vendor == "0x1002":    # AMD vendor ID
-                    _AMD_DEV = _card
-                    _hw = glob.glob(os.path.join(_card, "hwmon", "hwmon*"))
-                    _AMD_HWMON = _hw[0] if _hw else None
-                    # GPU name: try product_name, then lspci, then generic
-                    GPU_NAME = "AMD GPU"
-                    try:
-                        with open(os.path.join(_card, "product_name")) as _f:
-                            _pn = _f.read().strip()
-                            if _pn:
-                                GPU_NAME = _pn
-                    except Exception:
-                        pass
-                    if GPU_NAME == "AMD GPU":
-                        try:
-                            with open(os.path.join(_card, "uevent")) as _f:
-                                _slot = next(
-                                    (l.split("=", 1)[1].strip() for l in _f
-                                     if l.startswith("PCI_SLOT_NAME=")), None
-                                )
-                            if _slot:
-                                _r = subprocess.run(["lspci", "-s", _slot],
-                                                    capture_output=True, text=True, timeout=3)
-                                if _r.returncode == 0:
-                                    _parts = _r.stdout.strip().split(":", 2)
-                                    if len(_parts) >= 3:
-                                        GPU_NAME = _parts[2].strip()
-                        except Exception:
-                            pass
-                    print(f"[INFO] AMD GPU: {GPU_NAME}")
-                    break
-                elif _vendor == "0x8086":  # Intel vendor ID
-                    _INTEL_DEV = _card
-                    _hw = glob.glob(os.path.join(_card, "hwmon", "hwmon*"))
-                    _INTEL_HWMON = _hw[0] if _hw else None
-                    # GPU name: try product_name, then lspci, then generic
-                    GPU_NAME = "Intel GPU"
-                    try:
-                        with open(os.path.join(_card, "product_name")) as _f:
-                            _pn = _f.read().strip()
-                            if _pn:
-                                GPU_NAME = _pn
-                    except Exception:
-                        pass
-                    if GPU_NAME == "Intel GPU":
-                        try:
-                            with open(os.path.join(_card, "uevent")) as _f:
-                                _slot = next(
-                                    (l.split("=", 1)[1].strip() for l in _f
-                                     if l.startswith("PCI_SLOT_NAME=")), None
-                                )
-                            if _slot:
-                                _r = subprocess.run(["lspci", "-s", _slot],
-                                                    capture_output=True, text=True, timeout=3)
-                                if _r.returncode == 0:
-                                    _parts = _r.stdout.strip().split(":", 2)
-                                    if len(_parts) >= 3:
-                                        GPU_NAME = _parts[2].strip()
-                        except Exception:
-                            pass
-                    print(f"[INFO] Intel GPU: {GPU_NAME}")
-                    break
+                _cards.append((_f.read().strip(), _card))
         except Exception:
-            continue
+            pass
+
+    # Prefer AMD discrete (0x1002) over Intel iGPU (0x8086)
+    for _wanted in ("0x1002", "0x8086"):
+        for _vendor, _card in _cards:
+            if _vendor != _wanted:
+                continue
+            _hw = glob.glob(os.path.join(_card, "hwmon", "hwmon*"))
+            _hwmon = _hw[0] if _hw else None
+            if _wanted == "0x1002":
+                _AMD_DEV, _AMD_HWMON = _card, _hwmon
+                GPU_NAME = _gpu_name_from_sysfs(_card, "AMD GPU")
+                print(f"[INFO] AMD GPU: {GPU_NAME}")
+            else:
+                _INTEL_DEV, _INTEL_HWMON = _card, _hwmon
+                GPU_NAME = _gpu_name_from_sysfs(_card, "Intel GPU")
+                print(f"[INFO] Intel GPU: {GPU_NAME}")
+            break
+        if _AMD_DEV or _INTEL_DEV:
+            break
     else:
-        if not _AMD_DEV and not _INTEL_DEV:
-            print("[WARN] No supported GPU found (NVIDIA, AMD, or Intel)")
+        print("[WARN] No supported GPU found (NVIDIA, AMD, or Intel)")
 
 # ── Palette ──────────────────────────────────────────────────────────────────
 BG       = "#090b10"
@@ -177,6 +155,10 @@ def _font(px: int, bold: bool = False) -> QFont:
     return f
 
 def _make_tray_icon() -> QIcon:
+    icon_path = os.path.join(_SCRIPT_DIR, "assets", "icon.png")
+    if os.path.exists(icon_path):
+        return QIcon(icon_path)
+    # Fallback: draw a simple arc icon
     px = QPixmap(32, 32)
     px.fill(Qt.GlobalColor.transparent)
     p = QPainter(px)
@@ -267,23 +249,16 @@ def s_gpu_usage() -> float:
         except Exception:
             return 0.0
     if _INTEL_DEV:
-        # Intel GPU usage via i915/xe driver counters (if available)
-        try:
-            # Try via sysfs intel_gpu_freq_mhz / intel_rps_cur_freq_mhz
-            # Falls back to psutil hwmon if available
-            if _INTEL_HWMON:
-                # Check for freq_* files that indicate activity
-                freq_files = glob.glob(os.path.join(_INTEL_HWMON, "in*_input"))
-                if freq_files:
-                    try:
-                        with open(freq_files[0]) as f:
-                            freq = float(f.read().strip())
-                            # Normalize to ~0-100% (rough estimate based on max ~2500MHz for Intel GPUs)
-                            return min(100.0, (freq / 2500.0) * 100.0)
-                    except Exception:
-                        pass
-        except Exception:
-            pass
+        # i915/xe don't expose a usage % via sysfs; use freq0_input/freq0_max
+        # as a rough activity proxy (current freq / max freq).
+        if _INTEL_HWMON:
+            try:
+                cur = float(open(os.path.join(_INTEL_HWMON, "freq0_input")).read().strip())
+                mx  = float(open(os.path.join(_INTEL_HWMON, "freq0_max")).read().strip())
+                if mx > 0:
+                    return min(100.0, cur / mx * 100.0)
+            except Exception:
+                pass
         return 0.0
     return 0.0
 
@@ -347,20 +322,19 @@ def s_gpu_vram():
         except Exception:
             pass
     if _INTEL_DEV:
-        # Intel GPU memory via hwmon or sysfs (if exposed by i915/xe driver)
-        try:
-            # Try reading from device mem info files (if available)
-            mem_used_file = os.path.join(_INTEL_DEV, "mem_info_gtt_used")
-            mem_total_file = os.path.join(_INTEL_DEV, "mem_info_gtt_total")
-            if os.path.exists(mem_used_file) and os.path.exists(mem_total_file):
-                with open(mem_used_file) as f:
-                    used = int(f.read().strip())
-                with open(mem_total_file) as f:
-                    total = int(f.read().strip())
-                pct = used / total * 100 if total else 0
-                return used >> 20, total >> 20, pct
-        except Exception:
-            pass
+        # Try dedicated VRAM first (Intel Arc discrete), then GTT (iGPU approximation)
+        for uf, tf in (("mem_info_vram_used", "mem_info_vram_total"),
+                       ("mem_info_gtt_used",  "mem_info_gtt_total")):
+            up = os.path.join(_INTEL_DEV, uf)
+            tp = os.path.join(_INTEL_DEV, tf)
+            if os.path.exists(up) and os.path.exists(tp):
+                try:
+                    used  = int(open(up).read().strip())
+                    total = int(open(tp).read().strip())
+                    pct   = used / total * 100 if total else 0
+                    return used >> 20, total >> 20, pct
+                except Exception:
+                    pass
     return 0, 0, 0
 
 def s_ram():
@@ -745,13 +719,19 @@ class TitleBar(QWidget):
         title.setFont(_font(17, bold=True))
         title.setStyleSheet(f"color: {CYAN}; letter-spacing: 3px; background: transparent;")
 
-        sep_dot = QLabel("  ·  ")
-        sep_dot.setStyleSheet(f"color: {TXT_LO}; background: transparent;")
-
+        # CPU + GPU names stacked vertically so they never get clipped
         cpu_name = _get_cpu_name()
-        hw_lbl = QLabel(f"{cpu_name}  ·  {GPU_NAME}")
-        hw_lbl.setFont(_font(13))
-        hw_lbl.setStyleSheet(f"color: {TXT_LO}; background: transparent;")
+        hw_box = QWidget()
+        hw_box.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        hw_box.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        hw_v = QVBoxLayout(hw_box)
+        hw_v.setContentsMargins(10, 0, 0, 0); hw_v.setSpacing(1)
+        for hw_text in (cpu_name, GPU_NAME):
+            lbl = QLabel(hw_text)
+            lbl.setFont(_font(11))
+            lbl.setStyleSheet(f"color: {TXT_LO}; background: transparent;")
+            lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            hw_v.addWidget(lbl)
 
         self._clk = QLabel()
         self._clk.setFont(_font(14))
@@ -765,10 +745,10 @@ class TitleBar(QWidget):
         for btn in (btn_min, btn_cls, self.dock_btn):
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
 
-        for lbl in (title, sep_dot, hw_lbl, self._clk):
+        for lbl in (title, self._clk):
             lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
-        lay.addWidget(title); lay.addWidget(sep_dot); lay.addWidget(hw_lbl)
+        lay.addWidget(title); lay.addWidget(hw_box)
         lay.addStretch()
         lay.addWidget(self._clk); lay.addSpacing(18)
         lay.addWidget(self.dock_btn); lay.addSpacing(10)
@@ -784,6 +764,11 @@ class TitleBar(QWidget):
             h = self._win.windowHandle()
             if h: h.startSystemMove()
         super().mousePressEvent(e)
+
+    def mouseDoubleClickEvent(self, e):
+        if e.button() == Qt.MouseButton.LeftButton:
+            self._win.toggle_dock()
+        super().mouseDoubleClickEvent(e)
 
 
 # ── Rounded window background ────────────────────────────────────────────────
@@ -994,8 +979,33 @@ class MainWindow(QMainWindow):
         self._sb.refresh()
 
 
+# ── Single-instance lock ──────────────────────────────────────────────────────
+_LOCK_SOCK = None
+
+def _acquire_instance_lock() -> bool:
+    """Bind a socket that acts as a single-instance lock. Returns False if
+    another instance is already running."""
+    global _LOCK_SOCK
+    try:
+        if sys.platform == "linux":
+            # Abstract Unix socket — kernel auto-releases it when the process exits
+            _LOCK_SOCK = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            _LOCK_SOCK.bind("\0heatsync_instance_v1")
+        else:
+            _LOCK_SOCK = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            _LOCK_SOCK.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
+            _LOCK_SOCK.bind(("127.0.0.1", 47321))
+        return True
+    except OSError:
+        return False
+
+
 # ── Entry point ──────────────────────────────────────────────────────────────
 def main():
+    if not _acquire_instance_lock():
+        # Another instance is already running — exit silently
+        sys.exit(0)
+
     app = QApplication(sys.argv)
     app.setApplicationName("HeatSync")
     if IS_WAYLAND:
