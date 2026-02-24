@@ -83,7 +83,12 @@ EOF
 
 echo "      Autostart entry created: $AUTOSTART_DIR/heatsync.desktop"
 
+# ── Mark the in-folder launcher executable ────────────────────────────────────
+chmod +x "$SCRIPT_DIR/HeatSync.desktop"
+echo "      HeatSync.desktop marked executable (double-click to launch)"
+
 echo ""
 echo "=== Done! ==="
 echo "Run HeatSync with:  bash run.sh"
 echo "Or directly:        .venv/bin/python HeatSync.py"
+echo "Or double-click:    HeatSync.desktop"
