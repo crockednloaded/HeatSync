@@ -708,6 +708,8 @@ class TitleBar(QWidget):
     def __init__(self, parent_win):
         super().__init__(parent_win)
         self._win = parent_win
+        self._last_press_ms = 0.0
+        self._press_pos = None  # set when docked+pressed; cleared on release/drag/dblclick
         self.setFixedHeight(52)
         self.setStyleSheet("background: transparent;")
         self.setCursor(Qt.CursorShape.SizeAllCursor)
@@ -759,14 +761,38 @@ class TitleBar(QWidget):
 
     def mousePressEvent(self, e):
         if e.button() == Qt.MouseButton.LeftButton:
-            if self._win._docked:
-                self._win.toggle_dock(via_drag=True)
-            h = self._win.windowHandle()
-            if h: h.startSystemMove()
+            now = time.monotonic() * 1000
+            dt, self._last_press_ms = now - self._last_press_ms, now
+            if dt > QApplication.doubleClickInterval():
+                if self._win._docked:
+                    # Docked: hold off on startSystemMove so we can detect a
+                    # drag in mouseMoveEvent without the compositor stealing it
+                    self._press_pos = e.position()
+                else:
+                    h = self._win.windowHandle()
+                    if h: h.startSystemMove()
         super().mousePressEvent(e)
+
+    def mouseMoveEvent(self, e):
+        if (self._press_pos is not None
+                and self._win._docked
+                and e.buttons() & Qt.MouseButton.LeftButton):
+            delta = e.position() - self._press_pos
+            if abs(delta.x()) + abs(delta.y()) > QApplication.startDragDistance():
+                self._press_pos = None
+                self._win.toggle_dock(via_drag=True)
+                h = self._win.windowHandle()
+                if h: h.startSystemMove()
+        super().mouseMoveEvent(e)
+
+    def mouseReleaseEvent(self, e):
+        if e.button() == Qt.MouseButton.LeftButton:
+            self._press_pos = None
+        super().mouseReleaseEvent(e)
 
     def mouseDoubleClickEvent(self, e):
         if e.button() == Qt.MouseButton.LeftButton:
+            self._press_pos = None
             self._win.toggle_dock()
         super().mouseDoubleClickEvent(e)
 

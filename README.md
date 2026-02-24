@@ -14,9 +14,10 @@ A dark-themed, frameless desktop widget inspired by NZXT CAM — built with PyQt
 - **Status bar** — RAM, VRAM, CPU frequency, thread count, and disk usage (used/total GB + %)
 - **12-hour clock** in the title bar
 - **Frameless window** — draggable from title bar, resizable from bottom-right grip
-- **Dock-to-top** — snaps the window to the top edge of the monitor as a full-width bar; click again to restore
+- **Dock-to-top** — snaps the window to the top edge of the monitor as a full-width bar; double-click the title bar or the dock button to toggle; drag while docked to undock and reposition
 - **System tray only** — no taskbar icon; left-click the tray icon to show/hide; close button hides to tray
-- **Auto-detects NVIDIA and AMD GPUs** — NVIDIA via pynvml, AMD via sysfs (no extra drivers needed)
+- **Auto-detects NVIDIA, AMD, and Intel GPUs** — NVIDIA via pynvml, AMD and Intel via sysfs (no extra drivers needed)
+- **Intel CPU temperature** — via `coretemp` kernel driver, works out of the box on all Intel platforms
 - **Dark aesthetic** — `#090b10` background, JetBrains Mono Nerd Font, neon cyan / green / purple / amber
 
 ---
@@ -91,7 +92,11 @@ rem or
 
 **NVIDIA** GPUs are monitored via `pynvml` (nvidia-ml-py).
 
-**AMD** GPUs are monitored via the `amdgpu` kernel driver's sysfs interface — no extra software or drivers required beyond what ships with the Linux kernel. Usage, VRAM, and temperature are all supported.
+**AMD** GPUs are monitored via the `amdgpu` kernel driver's sysfs interface — usage, VRAM, and temperature are all supported. No extra software or drivers required.
+
+**Intel Arc** discrete GPUs are monitored via the `xe`/`i915` kernel driver's sysfs interface — temperature, VRAM, and a frequency-based usage estimate are supported. Intel iGPUs (integrated graphics) are also detected and will show temperature and GTT memory usage.
+
+Priority order when multiple GPUs are present: NVIDIA → AMD → Intel.
 
 If no supported GPU is detected, GPU gauges will display as unavailable.
 
@@ -108,7 +113,7 @@ On Windows, CPU temperature requires [LibreHardwareMonitor](https://github.com/L
 
 ## Contributing
 
-Contributions are welcome. Feel free to open an issue or submit a pull request for bug fixes, new features, or platform improvements (AMD GPU support especially appreciated).
+Contributions are welcome. Feel free to open an issue or submit a pull request for bug fixes, new features, or platform improvements.
 
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/your-feature`)
