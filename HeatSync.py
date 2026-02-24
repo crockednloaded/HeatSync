@@ -432,10 +432,12 @@ class ArcGauge(QWidget):
             self.update()
 
     def _active_col(self):
-        pct = (self._cur - self._lo) / max(self._hi - self._lo, 1e-9) * 100
-        if pct >= self._danger: return self._c_dang
-        if pct >= self._warn:   return self._c_warn
-        return self._col
+        """White (0%) → warm orange (50%) → deep red (100%)."""
+        pct = max(0.0, min(1.0, (self._cur - self._lo) / max(self._hi - self._lo, 1e-9)))
+        r = 255
+        g = int(255 * (1.0 - pct) ** 0.6)
+        b = int(255 * (1.0 - pct) ** 1.5)
+        return QColor(r, g, b)
 
     def paintEvent(self, _e):
         W, H   = self.width(), self.height()
@@ -495,6 +497,19 @@ class ArcGauge(QWidget):
         vig.setColorAt(1.0, QColor(0, 0, 0, 70))
         p.setBrush(QBrush(vig))
         p.drawEllipse(rect.adjusted(1, 1, -1, -1))
+        # Atmospheric heat glow — ring of colour at arc radius, builds with value
+        if pct > 0.02:
+            atm_alpha = int(pct * 60)
+            atm = QRadialGradient(cx, cy, r2 * 0.96)
+            ac0 = QColor(col); ac0.setAlpha(0)
+            ac1 = QColor(col); ac1.setAlpha(atm_alpha)
+            atm.setColorAt(0.0,  ac0)
+            atm.setColorAt(0.55, ac0)
+            atm.setColorAt(0.82, ac1)
+            atm.setColorAt(1.0,  ac0)
+            p.setBrush(QBrush(atm))
+            p.setPen(Qt.PenStyle.NoPen)
+            p.drawEllipse(rect.adjusted(1, 1, -1, -1))
         p.setBrush(Qt.BrushStyle.NoBrush)
 
         # ── Arc track (inset so tick marks have room in the outer ring) ───
@@ -504,6 +519,12 @@ class ArcGauge(QWidget):
         arc_r2   = r2 - inset
         trk = QPen(QColor("#0d1020"), trk_w); trk.setCapStyle(Qt.PenCapStyle.FlatCap)
         p.setPen(trk); p.drawArc(arc_rect, a0, a_end)
+        # Subtle colour hint on the unused portion of the track
+        if pct < 0.99:
+            hint_c = QColor(col); hint_c.setAlpha(22)
+            hp = QPen(hint_c, trk_w - 2); hp.setCapStyle(Qt.PenCapStyle.FlatCap)
+            p.setPen(hp)
+            p.drawArc(arc_rect, a0 + a_val, a_end - a_val)
 
         # ── Tick marks in the ring between face rim and arc track ─────────
         t_outer = r2 - 2.5
@@ -533,6 +554,10 @@ class ArcGauge(QWidget):
                 p.setPen(pk); p.drawArc(arc_rect, a0, a_val)
             pk = QPen(col, trk_w); pk.setCapStyle(Qt.PenCapStyle.RoundCap)
             p.setPen(pk); p.drawArc(arc_rect, a0, a_val)
+            # White specular highlight — thin bright core gives arc a 3-D sheen
+            spec = QPen(QColor(255, 255, 255, 55), max(1.0, trk_w * 0.28))
+            spec.setCapStyle(Qt.PenCapStyle.FlatCap)
+            p.setPen(spec); p.drawArc(arc_rect, a0, a_val)
 
             tip_ang = math.radians(self._DEG_START + self._DEG_SPAN * pct)
             tip_x   = cx + arc_r2 * math.cos(tip_ang)
@@ -698,7 +723,7 @@ class MonitorCard(QFrame):
         super().__init__()
         self._accent = QColor(color)
         self.gauge   = ArcGauge(label, unit, lo, hi, color, warn, danger)
-        self.spark   = Sparkline(color, unit=unit)
+        self.spark   = Sparkline(CYAN, unit=unit)
 
         sep = QFrame(); sep.setFixedHeight(1)
         sep.setStyleSheet(f"background: {CARD_BD}; border: none; border-radius: 0;")
@@ -862,6 +887,25 @@ class ResizeGrip(QWidget):
         p.end()
 
 
+# Vendor keywords for partial-highlight in hw labels
+_VENDOR_KEYWORDS = {
+    AMD_RED:      ("AMD", "RYZEN", "EPYC", "ATHLON", "THREADRIPPER"),
+    INTEL_BLUE:   ("INTEL",),
+    NVIDIA_GREEN: ("NVIDIA", "GEFORCE", "RTX", "GTX", "QUADRO", "TESLA"),
+}
+
+def _hw_html(text: str, color: str) -> str:
+    """Return HTML where only the vendor keyword is vendor-colored; rest is TXT_HI."""
+    keywords = _VENDOR_KEYWORDS.get(color, ())
+    parts = []
+    for word in text.split():
+        if any(kw in word.upper() for kw in keywords):
+            parts.append(f'<span style="color:{color};">{word}</span>')
+        else:
+            parts.append(f'<span style="color:{TXT_HI};">{word}</span>')
+    return " ".join(parts)
+
+
 # ── Title / Drag Bar ──────────────────────────────────────────────────────────
 class TitleBar(QWidget):
     def __init__(self, parent_win, cpu_color=None, gpu_color=None):
@@ -920,9 +964,11 @@ class TitleBar(QWidget):
         hw_v = QVBoxLayout(hw_box)
         hw_v.setContentsMargins(10, 0, 0, 0); hw_v.setSpacing(1)
         for hw_text, hw_col in ((cpu_name, cpu_col), (GPU_NAME, gpu_col)):
-            lbl = QLabel(hw_text)
+            lbl = QLabel()
+            lbl.setTextFormat(Qt.TextFormat.RichText)
+            lbl.setText(_hw_html(hw_text, hw_col))
             lbl.setFont(_font(11))
-            lbl.setStyleSheet(f"color: {hw_col}; background: transparent;")
+            lbl.setStyleSheet("background: transparent;")
             lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
             hw_v.addWidget(lbl)
 
@@ -1184,7 +1230,12 @@ class MainWindow(QMainWindow):
                     self.resize(w, h)
                 if x is not None and y is not None:
                     if IS_WAYLAND:
-                        self._kwin_move(x, y)
+                        if w and h:
+                            # Set position AND size atomically so KWin doesn't
+                            # overwrite the restored height with the old frame size.
+                            self._kwin_set_geometry(x, y, w, h)
+                        else:
+                            self._kwin_move(x, y)
                     else:
                         self.move(x, y)
                     # Seed _last_pos so _save_pos() has accurate coords on
