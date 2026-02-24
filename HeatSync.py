@@ -47,6 +47,9 @@ from PyQt6.QtGui   import (
     QIcon, QPixmap,
 )
 
+# ── Version ───────────────────────────────────────────────────────────────────
+VERSION = "v1.0.21"
+
 # ── Platform flags ────────────────────────────────────────────────────────────
 IS_WINDOWS = sys.platform == "win32"
 IS_WAYLAND = (sys.platform == "linux" and
@@ -717,9 +720,14 @@ class TitleBar(QWidget):
         lay = QHBoxLayout(self)
         lay.setContentsMargins(20, 0, 14, 0); lay.setSpacing(0)
 
-        title = QLabel("◈  HEATSYNC")
+        title = QLabel(f"◈  HEATSYNC")
         title.setFont(_font(17, bold=True))
         title.setStyleSheet(f"color: {CYAN}; letter-spacing: 3px; background: transparent;")
+
+        ver_lbl = QLabel(VERSION)
+        ver_lbl.setFont(_font(10))
+        ver_lbl.setStyleSheet(f"color: {TXT_LO}; background: transparent;")
+        ver_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
         # CPU + GPU names stacked vertically so they never get clipped
         cpu_name = _get_cpu_name()
@@ -750,7 +758,7 @@ class TitleBar(QWidget):
         for lbl in (title, self._clk):
             lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
-        lay.addWidget(title); lay.addWidget(hw_box)
+        lay.addWidget(title); lay.addSpacing(6); lay.addWidget(ver_lbl); lay.addWidget(hw_box)
         lay.addStretch()
         lay.addWidget(self._clk); lay.addSpacing(18)
         lay.addWidget(self.dock_btn); lay.addSpacing(10)
@@ -873,7 +881,7 @@ class MainWindow(QMainWindow):
         if QSystemTrayIcon.isSystemTrayAvailable():
             self._tray = QSystemTrayIcon(self)
             self._tray.setIcon(_make_tray_icon())
-            self._tray.setToolTip("HeatSync")
+            self._tray.setToolTip(f"HeatSync {VERSION}")
             menu = QMenu()
             menu.addAction("Show / Hide").triggered.connect(self._toggle_visibility)
             menu.addAction("Quit").triggered.connect(QApplication.instance().quit)
