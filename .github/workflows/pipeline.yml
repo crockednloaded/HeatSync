@@ -155,6 +155,7 @@ jobs:
             HeatSync.py
 
       - name: Sign EXE with Authenticode (SignPath.io)
+        if: ${{ secrets.SIGNPATH_API_TOKEN != '' }}
         uses: signpath/github-action-submit-signing-request@v1.1
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
