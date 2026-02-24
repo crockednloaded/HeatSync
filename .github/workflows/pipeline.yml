@@ -120,6 +120,7 @@ jobs:
             --name HeatSync `
             --icon=assets/icon.png `
             --add-data "assets:assets" `
+            --add-data "themes:themes" `
             HeatSync.py
 
       - name: Upload EXE artifact
@@ -169,6 +170,7 @@ jobs:
           pyinstaller \
             --onefile \
             --add-data "assets:assets" \
+            --add-data "themes:themes" \
             HeatSync.py
 
       - name: Create AppImage
