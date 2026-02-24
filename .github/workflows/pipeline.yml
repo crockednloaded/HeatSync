@@ -118,6 +118,7 @@ jobs:
             --onefile `
             --windowed `
             --name HeatSync `
+            --icon=assets/icon.ico `
             --add-data "assets:assets" `
             HeatSync.py
 
