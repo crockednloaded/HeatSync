@@ -126,6 +126,8 @@ jobs:
     name: 🪟 Build Windows EXE
     runs-on: windows-latest
     needs: versioner
+    env:
+      SIGNPATH_AVAILABLE: ${{ secrets.SIGNPATH_API_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -155,7 +157,7 @@ jobs:
             HeatSync.py
 
       - name: Sign EXE with Authenticode (SignPath.io)
-        if: ${{ secrets.SIGNPATH_API_TOKEN != '' }}
+        if: env.SIGNPATH_AVAILABLE == 'true'
         uses: signpath/github-action-submit-signing-request@v1.1
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
