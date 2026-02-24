@@ -29,7 +29,9 @@ else:
     if not os.path.exists(_VENV_PY) and os.path.exists(_VENV_PY_LEGACY):
         _VENV_PY = _VENV_PY_LEGACY
 
-if os.path.exists(_VENV_PY) and os.path.abspath(sys.executable) != os.path.abspath(_VENV_PY):
+if (not getattr(sys, "frozen", False)
+        and os.path.exists(_VENV_PY)
+        and os.path.abspath(sys.executable) != os.path.abspath(_VENV_PY)):
     os.execv(_VENV_PY, [_VENV_PY] + sys.argv)
 
 from collections import deque
