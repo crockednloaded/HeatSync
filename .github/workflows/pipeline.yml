@@ -102,8 +102,13 @@ jobs:
         run: |
           xvfb-run -a pytest tests/ -v --tb=short --cov=HeatSync --cov-report=xml --cov-report=term 2>&1 | tee /tmp/pytest-out.txt; EXIT=${PIPESTATUS[0]}
           if [ $EXIT -ne 0 ]; then
-            FAILURES=$(grep -A5 "FAILED\|ERROR" /tmp/pytest-out.txt | head -40 | tr '\n' '|')
-            echo "::error::Test failures: $FAILURES"
+            FAILURES=$(python3 -c "
+import re, sys
+content = open('/tmp/pytest-out.txt').read()
+m = re.search(r'=+ FAILURES =+(.+?)=+ short', content, re.DOTALL)
+print((m.group(1) if m else content[-1500:]).replace('\n','|'))
+" 2>/dev/null || grep -A3 "FAILED\|AssertionError" /tmp/pytest-out.txt | head -50 | tr '\n' '|')
+            echo "::error::$FAILURES"
           fi
           exit $EXIT
 
