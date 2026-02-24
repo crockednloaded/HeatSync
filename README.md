@@ -42,17 +42,32 @@ A dark-themed, frameless desktop widget inspired by NZXT CAM — built with PyQt
 
 ### Linux
 
+**Option 1 — AppImage (no Python required):**
+
+Download the latest **HeatSync.AppImage** from the [Releases](https://github.com/crockednloaded/HeatSync/releases) page, then:
+
+```bash
+chmod +x HeatSync.AppImage
+./HeatSync.AppImage
+```
+
+**Option 2 — Run from source:**
+
 ```bash
 git clone https://github.com/crockednloaded/HeatSync.git
 cd HeatSync
 bash install.sh
 ```
 
-`install.sh` creates a `.venv`, installs all dependencies, and optionally sets up autostart.
+`install.sh` creates a `.venv`, installs all dependencies, downloads the latest AppImage, and sets up autostart.
 
 Tested on CachyOS / Arch Linux with KDE Plasma on both Wayland and X11.
 
 ### Windows
+
+Download the pre-built **HeatSync.exe** from the [Releases](https://github.com/crockednloaded/HeatSync/releases) page — no Python required, just run it.
+
+Or run from source:
 
 ```bat
 git clone https://github.com/crockednloaded/HeatSync.git
@@ -60,15 +75,19 @@ cd HeatSync
 install.bat
 ```
 
-Alternatively, download the pre-built **HeatSync.exe** from the [Releases](https://github.com/crockednloaded/HeatSync/releases) page — no Python required.
-
 Tested on Windows 10 and Windows 11.
 
 ---
 
 ## Running
 
-**Linux**
+**Linux (AppImage)**
+
+```bash
+./HeatSync.AppImage
+```
+
+**Linux (from source)**
 
 ```bash
 bash run.sh
