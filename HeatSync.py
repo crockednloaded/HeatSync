@@ -37,6 +37,8 @@ if sys.executable != _VENV_PY and os.path.exists(_VENV_PY):
 from collections import deque
 
 import psutil
+import config
+from themes import get_active_theme, set_active_theme, list_available_themes
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget,
     QVBoxLayout, QHBoxLayout, QLabel, QFrame, QSizePolicy,
@@ -150,19 +152,30 @@ if not GPU_HANDLE and sys.platform == "linux":
             print("[WARN] No supported GPU found (NVIDIA, AMD, or Intel)")
 
 # ── Palette ──────────────────────────────────────────────────────────────────
-BG       = "#090b10"
-CARD_BG  = "#0e1018"
-CARD_BD  = "#1a1d2b"
-TXT_HI   = "#e5e8f0"
-TXT_MID  = "#848ba0"
-TXT_LO   = "#404560"
+# Load theme from config
+_THEME_NAME = config.get_theme()
+try:
+    set_active_theme(_THEME_NAME)
+except ValueError:
+    # Fall back to default if theme not found
+    set_active_theme('default')
+    config.set_theme('default')
 
-CYAN   = "#00ccdd"
-GREEN  = "#00e676"
-PURPLE = "#9d6fff"
-AMBER  = "#ffa040"
-C_WARN = "#ff9800"
-C_DANG = "#f44336"
+_THEME = get_active_theme()
+
+BG       = _THEME.background
+CARD_BG  = _THEME.card_background
+CARD_BD  = _THEME.card_border
+TXT_HI   = _THEME.text_high
+TXT_MID  = _THEME.text_mid
+TXT_LO   = _THEME.text_low
+
+CYAN   = _THEME.primary
+GREEN  = _THEME.success
+PURPLE = _THEME.secondary
+AMBER  = _THEME.warning
+C_WARN = _THEME.warning
+C_DANG = _THEME.danger
 
 # ── Font helper ──────────────────────────────────────────────────────────────
 _FONT_FAMILIES = ["JetBrainsMono NF", "JetBrainsMono Nerd Font", "JetBrains Mono",
@@ -865,6 +878,14 @@ class MainWindow(QMainWindow):
             self._tray.setToolTip("HeatSync")
             menu = QMenu()
             menu.addAction("Show / Hide").triggered.connect(self._toggle_visibility)
+            
+            # Theme submenu
+            theme_menu = menu.addMenu("Theme")
+            available_themes = list_available_themes()
+            for theme_name in available_themes:
+                action = theme_menu.addAction(theme_name.replace('_', ' ').title())
+                action.triggered.connect(lambda checked=False, t=theme_name: self._change_theme(t))
+            
             menu.addAction("Quit").triggered.connect(QApplication.instance().quit)
             self._tray.setContextMenu(menu)
             self._tray.activated.connect(self._tray_activated)
@@ -893,6 +914,18 @@ class MainWindow(QMainWindow):
     def _tray_activated(self, reason):
         if reason == QSystemTrayIcon.ActivationReason.Trigger:
             self._toggle_visibility()
+
+    def _change_theme(self, theme_name: str):
+        """Change the active theme and save to config."""
+        try:
+            set_active_theme(theme_name)
+            config.set_theme(theme_name)
+            print(f"[INFO] Theme changed to '{theme_name}' (requires restart to apply)")
+            # Optional: Show notification
+            if self._tray:
+                self._tray.showMessage("HeatSync", f"Theme changed to {theme_name.title()}\n(restart to apply)", 2)
+        except Exception as e:
+            print(f"[ERROR] Failed to change theme: {e}")
 
     # ── KWin scripting (Linux Wayland only) ───────────────────────────────────
     def _kwin_run(self, js: str, tag: str = "hs") -> bool:
