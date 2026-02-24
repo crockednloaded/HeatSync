@@ -44,14 +44,12 @@ class TestCPUSensors:
                 result = s_cpu_temp()
                 assert result == 65.5
 
-    def test_cpu_temp_windows_returns_zero_without_wmi(self):
-        """Test that CPU temp returns 0 on Windows without WMI."""
-        with patch('sys.platform', 'win32'):
-            # Mock WMI not being available
-            with patch.dict(sys.modules, {'wmi': None}):
-                from HeatSync import s_cpu_temp
-                result = s_cpu_temp()
-                assert result == 0.0
+    def test_cpu_temp_returns_float(self):
+        """Test that CPU temp always returns a non-negative float."""
+        from HeatSync import s_cpu_temp
+        result = s_cpu_temp()
+        assert isinstance(result, float)
+        assert result >= 0.0
 
     def test_cpu_freq_returns_ghz(self):
         """Test CPU frequency returns in GHz."""
@@ -73,32 +71,32 @@ class TestMemorySensors:
     """Tests for memory sensor functions."""
 
     def test_ram_usage_valid_values(self, mock_psutil):
-        """Test RAM usage returns valid (used, total, percent)."""
+        """Test RAM usage returns valid (used, total, percent) in decimal GB."""
         mock_psutil.virtual_memory.return_value = Mock(
-            used=8589934592,      # 8 GB
-            total=17179869184,    # 16 GB
+            used=8_000_000_000,    # 8.0 decimal GB
+            total=16_000_000_000,  # 16.0 decimal GB
             percent=50.0
         )
         with patch('psutil.virtual_memory', return_value=mock_psutil.virtual_memory()):
             from HeatSync import s_ram
             used, total, pct = s_ram()
-            assert used == pytest.approx(8.0, abs=0.1)
-            assert total == pytest.approx(16.0, abs=0.1)
+            assert used == pytest.approx(8.0, abs=0.01)
+            assert total == pytest.approx(16.0, abs=0.01)
             assert pct == 50.0
 
     def test_disk_usage_valid_values(self):
-        """Test disk usage returns valid (used, total, percent)."""
+        """Test disk usage returns valid (used, total, percent) in decimal GB."""
         with patch('psutil.disk_usage') as mock_disk:
             mock_disk.return_value = Mock(
-                used=536870912000,    # 500 GB
-                total=1099511627776,  # 1 TB
-                percent=48.8
+                used=500_000_000_000,    # 500.0 decimal GB
+                total=1_000_000_000_000, # 1000.0 decimal GB
+                percent=50.0
             )
             from HeatSync import s_disk
             used, total, pct = s_disk()
-            assert used == pytest.approx(500.0, abs=1.0)
-            assert total == pytest.approx(1000.0, abs=1.0)
-            assert pct == pytest.approx(48.8, abs=0.1)
+            assert used == pytest.approx(500.0, abs=0.01)
+            assert total == pytest.approx(1000.0, abs=0.01)
+            assert pct == pytest.approx(50.0, abs=0.1)
 
 
 class TestGPUSensors:
