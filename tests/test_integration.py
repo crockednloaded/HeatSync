@@ -100,8 +100,8 @@ class TestUIComponents:
             from HeatSync import ArcGauge
             gauge = ArcGauge("Test", "%", lo=0, hi=100, color="#00ccdd")
             assert gauge is not None
-            assert gauge.width() > 0
-            assert gauge.height() > 0
+            assert gauge.minimumWidth() > 0
+            assert gauge.minimumHeight() > 0
         except ImportError:
             pytest.skip("PyQt6 not available")
 
