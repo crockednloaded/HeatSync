@@ -154,6 +154,19 @@ jobs:
             --add-data "assets:assets" `
             HeatSync.py
 
+      - name: Sign EXE with Authenticode (SignPath.io)
+        if: ${{ secrets.SIGNPATH_API_TOKEN != '' }}
+        uses: signpath/github-action-submit-signing-request@v1.1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ secrets.SIGNPATH_ORG_ID }}
+          project-slug: heatsync
+          signing-policy-slug: release-signing
+          artifact-configuration-slug: exe
+          github-artifact-id: HeatSync-Windows-${{ needs.versioner.outputs.version }}
+          wait-for-completion: true
+          output-artifact-directory: dist/
+
       - name: Upload EXE artifact
         uses: actions/upload-artifact@v4
         with:
@@ -270,6 +283,35 @@ jobs:
           mkdir -p release-files
           find release-artifacts -type f \( -name "HeatSync.exe" -o -name "HeatSync.AppImage" \) -exec cp {} release-files/ \;
           ls -lah release-files/
+
+      - name: Import GPG signing key
+        if: ${{ secrets.GPG_PRIVATE_KEY != '' }}
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+          echo "$GPG_PASSPHRASE" | gpg --batch --passphrase-fd 0 --pinentry-mode loopback \
+            --list-secret-keys
+
+      - name: Sign release artifacts with GPG
+        if: ${{ secrets.GPG_PRIVATE_KEY != '' }}
+        env:
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          for f in release-files/HeatSync.exe release-files/HeatSync.AppImage; do
+            if [ -f "$f" ]; then
+              echo "$GPG_PASSPHRASE" | gpg --batch --yes --passphrase-fd 0 \
+                --pinentry-mode loopback --detach-sign --armor "$f"
+              echo "Signed: $f"
+            fi
+          done
+
+      - name: Generate SHA256 checksums
+        run: |
+          cd release-files
+          sha256sum $(ls) > SHA256SUMS
+          cat SHA256SUMS
 
       - name: Create Release
         uses: softprops/action-gh-release@v2

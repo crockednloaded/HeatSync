@@ -130,6 +130,40 @@ On Windows, CPU temperature requires [LibreHardwareMonitor](https://github.com/L
 
 ---
 
+## Verifying Downloads
+
+All release artifacts are signed with GPG and accompanied by SHA256 checksums so you can verify authenticity and integrity.
+
+### Import the signing key
+
+```bash
+gpg --import heatsync-signing-key.asc
+```
+
+The public key file `heatsync-signing-key.asc` is available in the root of this repository.
+
+### Verify a signature
+
+```bash
+# Linux AppImage
+gpg --verify HeatSync.AppImage.asc HeatSync.AppImage
+
+# Windows EXE
+gpg --verify HeatSync.exe.asc HeatSync.exe
+```
+
+A `Good signature` message means the file is authentic and unmodified.
+
+### Verify checksums
+
+```bash
+sha256sum -c SHA256SUMS
+```
+
+All three files (`SHA256SUMS`, `.asc` signatures, and the binaries) are attached to every GitHub Release.
+
+---
+
 ## Contributing
 
 Contributions are welcome. Feel free to open an issue or submit a pull request for bug fixes, new features, or platform improvements.

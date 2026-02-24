@@ -1,0 +1,111 @@
+name: 🔑 Generate GPG Signing Key
+
+on:
+  workflow_dispatch:
+    inputs:
+      key_name:
+        description: "Name for the GPG key (e.g. HeatSync Release)"
+        required: false
+        default: "HeatSync Release"
+        type: string
+      key_email:
+        description: "Email for the GPG key"
+        required: false
+        default: "heatsync-release@users.noreply.github.com"
+        type: string
+
+jobs:
+  generate-key:
+    name: Generate Ed25519 GPG Key
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install GPG
+        run: sudo apt-get update && sudo apt-get install -y gnupg
+
+      - name: Generate GPG key
+        id: gen
+        env:
+          KEY_NAME: ${{ inputs.key_name }}
+          KEY_EMAIL: ${{ inputs.key_email }}
+        run: |
+          # Generate a random passphrase
+          PASSPHRASE=$(openssl rand -base64 32)
+          echo "::add-mask::$PASSPHRASE"
+
+          # Create batch key generation config
+          cat > /tmp/keygen.conf << EOF
+          %echo Generating Ed25519 GPG key
+          Key-Type: eddsa
+          Key-Curve: ed25519
+          Key-Usage: sign
+          Subkey-Type: ecdh
+          Subkey-Curve: cv25519
+          Subkey-Usage: encrypt
+          Name-Real: ${KEY_NAME}
+          Name-Email: ${KEY_EMAIL}
+          Expire-Date: 4y
+          Passphrase: ${PASSPHRASE}
+          %commit
+          %echo Key generation complete
+          EOF
+
+          gpg --batch --gen-key /tmp/keygen.conf
+
+          # Get key fingerprint
+          FINGERPRINT=$(gpg --list-secret-keys --with-colons "${KEY_EMAIL}" | awk -F: '/^fpr:/{print $10; exit}')
+          echo "fingerprint=${FINGERPRINT}" >> $GITHUB_OUTPUT
+          echo "Key fingerprint: ${FINGERPRINT}"
+
+          # Export private key (armored)
+          gpg --batch --yes --passphrase "${PASSPHRASE}" --pinentry-mode loopback \
+            --armor --export-secret-keys "${FINGERPRINT}" > /tmp/heatsync-private-key.asc
+
+          # Export public key (armored)
+          gpg --armor --export "${FINGERPRINT}" > /tmp/heatsync-signing-key.asc
+
+          # Save passphrase to file for artifact (mask it from logs)
+          echo "${PASSPHRASE}" > /tmp/GPG_PASSPHRASE.txt
+
+          echo "Key generated successfully."
+          echo ""
+          echo "Public key fingerprint: ${FINGERPRINT}"
+          gpg --list-keys "${FINGERPRINT}"
+
+      - name: Upload public key artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: heatsync-public-key
+          path: /tmp/heatsync-signing-key.asc
+          retention-days: 1
+
+      - name: Upload private key artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: heatsync-private-key-SENSITIVE-DELETE-AFTER-USE
+          path: |
+            /tmp/heatsync-private-key.asc
+            /tmp/GPG_PASSPHRASE.txt
+          retention-days: 1
+
+      - name: Next steps
+        run: |
+          echo "============================================================"
+          echo "  GPG KEY GENERATED SUCCESSFULLY"
+          echo "============================================================"
+          echo ""
+          echo "NEXT STEPS:"
+          echo ""
+          echo "1. Download the 'heatsync-private-key-SENSITIVE-DELETE-AFTER-USE'"
+          echo "   artifact from this workflow run."
+          echo ""
+          echo "2. Add the following GitHub repository secrets:"
+          echo "   - GPG_PRIVATE_KEY  : contents of heatsync-private-key.asc"
+          echo "   - GPG_PASSPHRASE   : contents of GPG_PASSPHRASE.txt"
+          echo ""
+          echo "3. Download the 'heatsync-public-key' artifact and commit"
+          echo "   'heatsync-signing-key.asc' to the root of the repository."
+          echo ""
+          echo "4. DELETE the workflow artifact after adding the secrets."
+          echo "   (Artifacts auto-expire in 1 day, but delete manually to be safe.)"
+          echo ""
+          echo "============================================================"
