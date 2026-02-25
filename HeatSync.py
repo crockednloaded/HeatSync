@@ -75,7 +75,7 @@ def _get_version() -> str:
                 return tag
     except Exception:
         pass
-    return "v1.0.65"  # last-resort fallback
+    return "v1.0.69"  # last-resort fallback
 
 VERSION = _get_version()
 
