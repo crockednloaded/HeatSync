@@ -422,3 +422,73 @@ jobs:
           generate_release_notes: false
           draft: false
           prerelease: ${{ github.ref != 'refs/heads/main' }}
+
+  update-aur:
+    name: 📦 Update AUR Package
+    needs: [release, versioner]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get AppImage checksum from release
+        id: meta
+        run: |
+          VERSION="${{ needs.versioner.outputs.version }}"
+          SHA=$(curl -sL "https://github.com/crockednloaded/HeatSync/releases/download/v${VERSION}/SHA256SUMS" \
+            | grep "HeatSync.AppImage$" | awk '{print $1}')
+          echo "sha=${SHA}" >> $GITHUB_OUTPUT
+          echo "AppImage SHA256: ${SHA}"
+
+      - name: Update PKGBUILD and .SRCINFO
+        run: |
+          VERSION="${{ needs.versioner.outputs.version }}"
+          SHA="${{ steps.meta.outputs.sha }}"
+
+          sed -i "s/^pkgver=.*/pkgver=${VERSION}/" aur/PKGBUILD
+          sed -i "s/^pkgrel=.*/pkgrel=1/" aur/PKGBUILD
+          sed -i "0,/[0-9a-f]\{64\}/s/[0-9a-f]\{64\}/${SHA}/" aur/PKGBUILD
+
+          sed -i "s/\tpkgver = .*/\tpkgver = ${VERSION}/" aur/.SRCINFO
+          sed -i "s/\tpkgrel = .*/\tpkgrel = 1/" aur/.SRCINFO
+          sed -i "s/HeatSync-[0-9.]*\.AppImage/HeatSync-${VERSION}.AppImage/g" aur/.SRCINFO
+          sed -i "0,/sha256sums = [0-9a-f]\{64\}/s/sha256sums = [0-9a-f]\{64\}/sha256sums = ${SHA}/" aur/.SRCINFO
+
+      - name: Prepare AUR SSH key
+        env:
+          AUR_KEY_INPUT: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+        run: |
+          echo "::notice::Secret length: ${#AUR_KEY_INPUT}"
+          if [ -z "$AUR_KEY_INPUT" ]; then
+            echo "::error::AUR_SSH_PRIVATE_KEY secret is empty or not set. Store the raw private key (cat ~/.ssh/id_ed25519) as the secret value."
+            exit 1
+          fi
+          # Strip any CRLF line endings from the secret
+          CLEAN_KEY=$(printf '%s' "$AUR_KEY_INPUT" | tr -d '\r')
+          # Support both raw PEM and base64-encoded formats
+          if printf '%s' "$CLEAN_KEY" | grep -q 'BEGIN'; then
+            RAW_KEY="$CLEAN_KEY"
+            echo "::notice::Key format: raw PEM (${#RAW_KEY} chars)"
+          else
+            echo "::notice::Attempting base64 decode (input: ${#CLEAN_KEY} chars)"
+            if ! RAW_KEY=$(printf '%s' "$CLEAN_KEY" | base64 -d 2>/tmp/b64err); then
+              echo "::error::base64 decode failed: $(cat /tmp/b64err)"
+              exit 1
+            fi
+            echo "::notice::Key format: base64-decoded (${#RAW_KEY} chars)"
+          fi
+          FIRST_LINE=$(printf '%s' "$RAW_KEY" | head -1)
+          echo "::notice::Key first line: ${FIRST_LINE}"
+          # Write to GITHUB_ENV as multiline value
+          printf 'AUR_RAW_KEY<<__KEYEOF__\n%s\n__KEYEOF__\n' "$RAW_KEY" >> "$GITHUB_ENV"
+
+      - name: Deploy to AUR
+        uses: KSXGitHub/github-actions-deploy-aur@v3.0.1
+        with:
+          pkgname: heatsync-bin
+          pkgbuild: ./aur/PKGBUILD
+          commit_username: stev3m
+          commit_email: smackey2@gmail.com
+          ssh_private_key: ${{ env.AUR_RAW_KEY }}
+          commit_message: Update to v${{ needs.versioner.outputs.version }}
+          force_push: 'true'
