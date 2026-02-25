@@ -8,6 +8,8 @@ A dark-themed, frameless desktop widget built with PyQt6. Circular arc gauges, s
 
 ![HeatSync](assets/screenshot.png)
 
+![HeatSync under load](assets/screenshot-load.png)
+
 ---
 
 ## Download
