@@ -41,7 +41,7 @@ jobs:
           if [[ -n "${{ inputs.version }}" ]]; then
             VERSION="${{ inputs.version }}"
           else
-            VERSION="1.0.${{ github.run_number }}"
+            VERSION=$(cat VERSION)
           fi
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "Version: ${VERSION}"
@@ -154,6 +154,7 @@ jobs:
             --name HeatSync `
             --icon=assets/icon.png `
             --add-data "assets:assets" `
+            --add-data "VERSION:." `
             HeatSync.py
 
       - name: Sign EXE with Authenticode (SignPath.io)
@@ -220,6 +221,7 @@ jobs:
           pyinstaller \
             --onefile \
             --add-data "assets:assets" \
+            --add-data "VERSION:." \
             HeatSync.py
 
       - name: Create AppImage
@@ -307,6 +309,7 @@ jobs:
             --name HeatSync \
             --icon assets/icon.icns \
             --add-data "assets:assets" \
+            --add-data "VERSION:." \
             HeatSync.py
 
       - name: Package as DMG

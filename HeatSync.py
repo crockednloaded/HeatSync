@@ -53,8 +53,17 @@ from PyQt6.QtGui   import (
 
 # ── Version ───────────────────────────────────────────────────────────────────
 def _get_version() -> str:
-    """Read version from git tags at runtime; fall back to the hardcoded value
-    (which CI replaces before packaging the standalone EXE / AppImage)."""
+    # 1. Try bundled VERSION file (local dev + frozen AppImage/exe/dmg)
+    bases = ([sys._MEIPASS] if getattr(sys, 'frozen', False) else []) + [_SCRIPT_DIR]
+    for base in bases:
+        try:
+            with open(os.path.join(base, "VERSION")) as f:
+                v = f.read().strip()
+                if v:
+                    return f"v{v}" if not v.startswith("v") else v
+        except Exception:
+            pass
+    # 2. Try git tags (development fallback)
     try:
         r = subprocess.run(
             ["git", "describe", "--tags", "--abbrev=0"],
@@ -66,7 +75,7 @@ def _get_version() -> str:
                 return tag
     except Exception:
         pass
-    return "v1.0.22"  # fallback — replaced by CI before build
+    return "v1.0.65"  # last-resort fallback
 
 VERSION = _get_version()
 
