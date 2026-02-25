@@ -402,7 +402,7 @@ class ArcGauge(QWidget):
     _DEG_SPAN  = -300
     _HALOS = ((10, 8), (7, 20), (5, 38))
 
-    def __init__(self, label, unit, lo=0, hi=100, color=CYAN, warn=75, danger=90):
+    def __init__(self, label, unit, lo=0, hi=100, color=CYAN, warn=75, danger=90, is_temp=False):
         super().__init__()
         self._label   = label
         self._unit    = unit
@@ -412,6 +412,7 @@ class ArcGauge(QWidget):
         self._c_dang  = QColor(C_DANG)
         self._warn    = warn
         self._danger  = danger
+        self._is_temp = is_temp
         self._target  = 0.0
         self._cur     = 0.0
         self.setMinimumSize(190, 210)
@@ -432,7 +433,9 @@ class ArcGauge(QWidget):
             self.update()
 
     def _active_col(self):
-        """White (0%) → warm orange (50%) → deep red (100%)."""
+        if not self._is_temp:
+            return QColor(CYAN)
+        # Temp gauges: white (cool) → orange → red (hot)
         pct = max(0.0, min(1.0, (self._cur - self._lo) / max(self._hi - self._lo, 1e-9)))
         r = 255
         g = int(255 * (1.0 - pct) ** 0.6)
@@ -719,10 +722,10 @@ class Sparkline(QWidget):
 class MonitorCard(QFrame):
     _R = 18.0
 
-    def __init__(self, label, unit, lo=0, hi=100, color=CYAN, warn=75, danger=90):
+    def __init__(self, label, unit, lo=0, hi=100, color=CYAN, warn=75, danger=90, is_temp=False):
         super().__init__()
         self._accent = QColor(color)
-        self.gauge   = ArcGauge(label, unit, lo, hi, color, warn, danger)
+        self.gauge   = ArcGauge(label, unit, lo, hi, color, warn, danger, is_temp=is_temp)
         self.spark   = Sparkline(CYAN, unit=unit)
 
         sep = QFrame(); sep.setFixedHeight(1)
@@ -1091,10 +1094,10 @@ class MainWindow(QMainWindow):
         root.addWidget(div)
 
         row = QHBoxLayout(); row.setSpacing(12)
-        self._cu = MonitorCard("CPU USAGE", "%",   0, 100, CPU_COLOR, 70, 90)
-        self._ct = MonitorCard("CPU TEMP",  "°C",  0, 105, CPU_COLOR, 80, 95)
-        self._gu = MonitorCard("GPU USAGE", "%",   0, 100, GPU_COLOR, 70, 90)
-        self._gt = MonitorCard("GPU TEMP",  "°C",  0,  95, GPU_COLOR, 75, 88)
+        self._cu = MonitorCard("CPU USAGE", "%",   0, 100, CPU_COLOR, 70, 90, is_temp=False)
+        self._ct = MonitorCard("CPU TEMP",  "°C",  0, 105, CPU_COLOR, 80, 95, is_temp=True)
+        self._gu = MonitorCard("GPU USAGE", "%",   0, 100, GPU_COLOR, 70, 90, is_temp=False)
+        self._gt = MonitorCard("GPU TEMP",  "°C",  0,  95, GPU_COLOR, 75, 88, is_temp=True)
         for card in (self._cu, self._ct, self._gu, self._gt):
             row.addWidget(card)
         root.addLayout(row, 1)
