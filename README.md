@@ -1,5 +1,7 @@
 # HeatSync
 
+![GitHub release](https://img.shields.io/github/v/release/crockednloaded/HeatSync)
+
 **Real-time system monitor for Linux, Windows & macOS**
 
 A dark-themed, frameless desktop widget built with PyQt6. Circular arc gauges, sparkline history graphs, and a live status bar with vendor-aware hardware labels. Sits in your system tray and stays out of your way.
