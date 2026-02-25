@@ -417,7 +417,6 @@ jobs:
             - **Linux**: AppImage — works on most distributions (Ubuntu 18.04+, Fedora 32+, etc.)
             - **macOS**: DMG — drag HeatSync.app to Applications (Apple Silicon)
             - **Version**: `${{ needs.versioner.outputs.version }}`
-            - **Build**: #${{ github.run_number }}
 
             ### 📝 Changes
             See commit history for details.
